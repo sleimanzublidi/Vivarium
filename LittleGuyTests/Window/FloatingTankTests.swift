@@ -58,4 +58,98 @@ final class FloatingTankTests: XCTestCase {
                                                       defaultIfInvalid: defaultRect)
         XCTAssertEqual(result, onSecond)
     }
+
+    // MARK: - resolveRestoredFrame
+
+    private func screen(_ id: UInt32, _ frame: NSRect, dockHeight: CGFloat = 0) -> ScreenInfo {
+        ScreenInfo(displayID: id,
+                   frame: frame,
+                   visibleFrame: NSRect(x: frame.origin.x,
+                                        y: frame.origin.y + dockHeight,
+                                        width: frame.size.width,
+                                        height: frame.size.height - dockHeight))
+    }
+
+    func test_resolve_returnsDefaultWhenNothingPersisted() {
+        let defaultRect = NSRect(x: 200, y: 200, width: 320, height: 160)
+        let screens = [screen(1, NSRect(x: 0, y: 0, width: 1920, height: 1080))]
+        let result = FloatingTank.resolveRestoredFrame(saved: nil,
+                                                       currentScreens: screens,
+                                                       defaultRect: defaultRect)
+        XCTAssertEqual(result, defaultRect)
+    }
+
+    func test_resolve_keepsFrameOnSavedDisplayInThreeMonitorSetup() {
+        // Three monitors: main centred, second to the right, third to the left.
+        let main   = screen(1, NSRect(x: 0,     y: 0, width: 1920, height: 1080))
+        let right  = screen(2, NSRect(x: 1920,  y: 0, width: 1920, height: 1080))
+        let left   = screen(3, NSRect(x: -1920, y: 0, width: 1920, height: 1080))
+        let defaultRect = NSRect(x: 200, y: 200, width: 320, height: 160)
+
+        // Saved on the right-hand monitor.
+        let saved = PersistedTankFrame(
+            frame: NSRect(x: 2400, y: 500, width: 320, height: 160),
+            screenFrame: right.frame,
+            displayID: 2)
+
+        let result = FloatingTank.resolveRestoredFrame(saved: saved,
+                                                       currentScreens: [main, right, left],
+                                                       defaultRect: defaultRect)
+        XCTAssertEqual(result, NSRect(x: 2400, y: 500, width: 320, height: 160))
+    }
+
+    func test_resolve_translatesFrameWhenSavedDisplayMoved() {
+        // Display 2 was at x=1920 when saved; now it's at x=-1920 (user moved
+        // it to the left of main in System Settings). The window should
+        // travel with it instead of being abandoned at x=2400.
+        let main = screen(1, NSRect(x: 0, y: 0, width: 1920, height: 1080))
+        let movedRight = screen(2, NSRect(x: -1920, y: 0, width: 1920, height: 1080))
+        let defaultRect = NSRect(x: 200, y: 200, width: 320, height: 160)
+
+        let saved = PersistedTankFrame(
+            frame: NSRect(x: 2400, y: 500, width: 320, height: 160),
+            screenFrame: NSRect(x: 1920, y: 0, width: 1920, height: 1080),
+            displayID: 2)
+
+        let result = FloatingTank.resolveRestoredFrame(saved: saved,
+                                                       currentScreens: [main, movedRight],
+                                                       defaultRect: defaultRect)
+        // Translated by dx = -3840, dy = 0.
+        XCTAssertEqual(result, NSRect(x: -1440, y: 500, width: 320, height: 160))
+    }
+
+    func test_resolve_fallsBackWhenSavedDisplayUnplugged() {
+        // Display 2 (the one the window was on) is gone. Saved frame at
+        // x=2400 doesn't overlap any remaining screen → default.
+        let main = screen(1, NSRect(x: 0, y: 0, width: 1920, height: 1080))
+        let defaultRect = NSRect(x: 200, y: 200, width: 320, height: 160)
+
+        let saved = PersistedTankFrame(
+            frame: NSRect(x: 2400, y: 500, width: 320, height: 160),
+            screenFrame: NSRect(x: 1920, y: 0, width: 1920, height: 1080),
+            displayID: 2)
+
+        let result = FloatingTank.resolveRestoredFrame(saved: saved,
+                                                       currentScreens: [main],
+                                                       defaultRect: defaultRect)
+        XCTAssertEqual(result, defaultRect)
+    }
+
+    func test_resolve_keepsSavedFrameWhenDisplayGoneButFrameStillOverlaps() {
+        // Display 2 unplugged but the saved frame coincidentally still
+        // overlaps the main screen by enough — accept it as-is rather than
+        // jumping to the default.
+        let main = screen(1, NSRect(x: 0, y: 0, width: 1920, height: 1080))
+        let defaultRect = NSRect(x: 200, y: 200, width: 320, height: 160)
+
+        let saved = PersistedTankFrame(
+            frame: NSRect(x: 1700, y: 500, width: 320, height: 160),
+            screenFrame: NSRect(x: 1920, y: 0, width: 1920, height: 1080),
+            displayID: 2)
+
+        let result = FloatingTank.resolveRestoredFrame(saved: saved,
+                                                       currentScreens: [main],
+                                                       defaultRect: defaultRect)
+        XCTAssertEqual(result, NSRect(x: 1700, y: 500, width: 320, height: 160))
+    }
 }

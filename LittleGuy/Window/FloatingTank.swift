@@ -1,10 +1,15 @@
 // LittleGuy/Window/FloatingTank.swift
 import AppKit
+import IOKit.pwr_mgt
 import SpriteKit
 
 final class FloatingTank: NSWindow {
-    private static let frameAutosaveName: NSWindow.FrameAutosaveName = "LittleGuyFloatingTank"
+    private static let frameDefaultsKey = "LittleGuyFloatingTankFrame.v2"
+    private static let sleepAssertionReason = "LittleGuy floating tank visible" as CFString
     private let skView: SKView
+    private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
+    private var sleepAssertionActive = false
+    private var hasFinishedInitialRestore = false
 
     init(scene: SKScene, contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160)) {
         let view = SKView(frame: NSRect(origin: .zero, size: contentRect.size))
@@ -28,27 +33,137 @@ final class FloatingTank: NSWindow {
         self.acceptsMouseMovedEvents = true
         self.isReleasedWhenClosed = false
 
-        // Persist + restore frame across launches. setFrameAutosaveName arms
-        // future saves on every move/resize; setFrameUsingName applies any
-        // previously-saved frame now (no-op on first launch).
-        self.setFrameAutosaveName(Self.frameAutosaveName)
-        _ = self.setFrameUsingName(Self.frameAutosaveName)
+        // Restore the frame anchored to the display it was on, so the window
+        // returns to the same monitor across launches. NSWindow's built-in
+        // setFrameAutosaveName matches by visibleFrame string and silently
+        // falls back to NSScreen.main when that match fails — which it does
+        // routinely on multi-monitor setups when the Dock/Mission Control
+        // shifts a visibleFrame even slightly.
+        let restored = Self.resolveRestoredFrame(
+            saved: Self.loadPersistedFrame(),
+            currentScreens: NSScreen.screens.map(ScreenInfo.init(screen:)),
+            defaultRect: contentRect)
+        self.setFrame(restored, display: false)
+        hasFinishedInitialRestore = true
 
-        // If the restored frame doesn't meaningfully overlap any current screen
-        // (monitor layout changed since last save), reset to the default rect.
-        // Spec §12: "Negative or off-screen window frames after a monitor change
-        // → clamp to current screens before showing."
-        let visible = NSScreen.screens.map { $0.visibleFrame }
-        let safe = Self.clampFrameToScreens(self.frame,
-                                            visibleFrames: visible,
-                                            defaultIfInvalid: contentRect)
-        if safe != self.frame {
-            self.setFrame(safe, display: false)
-        }
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(persistFrame),
+                                               name: NSWindow.didMoveNotification,
+                                               object: self)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(persistFrame),
+                                               name: NSWindow.didResizeNotification,
+                                               object: self)
     }
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        releaseSleepAssertion()
+    }
+
+    // MARK: - Visibility → sleep assertion
+    //
+    // While the tank window is on-screen we hold a
+    // PreventUserIdleDisplaySleep assertion so the display (and, by
+    // extension, the system) stays awake. Display-sleep prevention
+    // implicitly prevents idle system sleep, so a single assertion
+    // covers both "monitor" and "device".
+
+    override func orderFront(_ sender: Any?) {
+        super.orderFront(sender)
+        acquireSleepAssertion()
+    }
+
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        super.makeKeyAndOrderFront(sender)
+        acquireSleepAssertion()
+    }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        releaseSleepAssertion()
+    }
+
+    override func close() {
+        super.close()
+        releaseSleepAssertion()
+    }
+
+    private func acquireSleepAssertion() {
+        guard !sleepAssertionActive else { return }
+        var newID = IOPMAssertionID(0)
+        let result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            Self.sleepAssertionReason,
+            &newID)
+        if result == kIOReturnSuccess {
+            sleepAssertionID = newID
+            sleepAssertionActive = true
+        } else {
+            NSLog("[ERROR] IOPMAssertionCreateWithName failed: \(result)")
+        }
+    }
+
+    private func releaseSleepAssertion() {
+        guard sleepAssertionActive else { return }
+        IOPMAssertionRelease(sleepAssertionID)
+        sleepAssertionID = IOPMAssertionID(0)
+        sleepAssertionActive = false
+    }
+
+    // MARK: - Frame persistence
+
+    @objc private func persistFrame() {
+        guard hasFinishedInitialRestore,
+              let screen = self.screen,
+              let displayID = screen.displayID else { return }
+        let payload = PersistedTankFrame(frame: self.frame,
+                                         screenFrame: screen.frame,
+                                         displayID: displayID)
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: Self.frameDefaultsKey)
+        }
+    }
+
+    private static func loadPersistedFrame() -> PersistedTankFrame? {
+        guard let data = UserDefaults.standard.data(forKey: frameDefaultsKey) else { return nil }
+        return try? JSONDecoder().decode(PersistedTankFrame.self, from: data)
+    }
+
+    /// Pure resolution: pick the right frame for a fresh launch given the
+    /// previously-persisted state and the current screen layout.
+    ///
+    /// Strategy, in order:
+    ///   1. If the saved display is still attached, re-anchor the frame to
+    ///      that display (in case it moved in System Settings) and clamp it
+    ///      to that display's visibleFrame.
+    ///   2. If the saved display is gone, accept the saved frame only if it
+    ///      still overlaps some current visibleFrame; otherwise return
+    ///      `defaultRect`.
+    ///   3. With no saved state, return `defaultRect`.
+    static func resolveRestoredFrame(saved: PersistedTankFrame?,
+                                     currentScreens: [ScreenInfo],
+                                     defaultRect: NSRect) -> NSRect
+    {
+        guard let saved else { return defaultRect }
+
+        if let match = currentScreens.first(where: { $0.displayID == saved.displayID }) {
+            let dx = match.frame.origin.x - saved.savedScreenFrame.origin.x
+            let dy = match.frame.origin.y - saved.savedScreenFrame.origin.y
+            let translated = saved.frame.offsetBy(dx: dx, dy: dy)
+            return clampFrameToScreens(translated,
+                                       visibleFrames: [match.visibleFrame],
+                                       defaultIfInvalid: defaultRect)
+        }
+
+        return clampFrameToScreens(saved.frame,
+                                   visibleFrames: currentScreens.map(\.visibleFrame),
+                                   defaultIfInvalid: defaultRect)
+    }
 
     /// Pure helper — no NSWindow/NSScreen dependency, so it's unit-testable.
     /// Returns `frame` if it overlaps any of `visibleFrames` by at least
@@ -67,5 +182,62 @@ final class FloatingTank: NSWindow {
             }
         }
         return defaultIfInvalid
+    }
+}
+
+// MARK: - Persistence model
+
+struct PersistedTankFrame: Codable, Equatable {
+    var x: CGFloat
+    var y: CGFloat
+    var width: CGFloat
+    var height: CGFloat
+    var displayID: UInt32
+    var screenX: CGFloat
+    var screenY: CGFloat
+    var screenWidth: CGFloat
+    var screenHeight: CGFloat
+
+    init(frame: NSRect, screenFrame: NSRect, displayID: UInt32) {
+        self.x = frame.origin.x
+        self.y = frame.origin.y
+        self.width = frame.size.width
+        self.height = frame.size.height
+        self.displayID = displayID
+        self.screenX = screenFrame.origin.x
+        self.screenY = screenFrame.origin.y
+        self.screenWidth = screenFrame.size.width
+        self.screenHeight = screenFrame.size.height
+    }
+
+    var frame: NSRect { NSRect(x: x, y: y, width: width, height: height) }
+    var savedScreenFrame: NSRect {
+        NSRect(x: screenX, y: screenY, width: screenWidth, height: screenHeight)
+    }
+}
+
+/// Plain-data screen descriptor so the resolution logic is testable without
+/// a real NSScreen / display server.
+struct ScreenInfo: Equatable {
+    var displayID: UInt32?
+    var frame: NSRect
+    var visibleFrame: NSRect
+
+    init(displayID: UInt32?, frame: NSRect, visibleFrame: NSRect) {
+        self.displayID = displayID
+        self.frame = frame
+        self.visibleFrame = visibleFrame
+    }
+
+    init(screen: NSScreen) {
+        self.displayID = screen.displayID
+        self.frame = screen.frame
+        self.visibleFrame = screen.visibleFrame
+    }
+}
+
+private extension NSScreen {
+    var displayID: UInt32? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
     }
 }

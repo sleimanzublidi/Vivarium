@@ -28,7 +28,10 @@ final class EventNormalizer: @unchecked Sendable {
         struct Envelope: Decodable { let agent: AgentType }
         guard let env = try? JSONDecoder().decode(Envelope.self, from: line),
               let adapter = adapters[env.agent]
-        else { return nil }
+        else {
+            NSLog("[WARNING] unrecognized agent")
+            return nil
+        }
         return adapter.adapt(rawJSON: line, receivedAt: receivedAt)
     }
 }

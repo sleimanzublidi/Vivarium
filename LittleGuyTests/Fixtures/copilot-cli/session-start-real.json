@@ -1,0 +1,13 @@
+{
+  "event": "sessionStart",
+  "agent": "copilot-cli",
+  "payload": {
+    "timestamp": 1778109283592,
+    "sessionId": "6654462f-8c50-4a2b-a421-1ea31d2b0ba0",
+    "cwd": "/Users/sleimanzublidi/Source/OneDrive.iOS",
+    "source": "fresh"
+  },
+  "ppid": 2543,
+  "pid": 3788,
+  "receivedAt": 1778109283.9847379
+}

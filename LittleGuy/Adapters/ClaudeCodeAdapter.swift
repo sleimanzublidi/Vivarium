@@ -26,13 +26,16 @@ struct ClaudeCodeAdapter: EventAdapter {
     func adapt(rawJSON: Data, receivedAt: Date) -> AgentEvent? {
         guard let env = try? JSONDecoder().decode(Envelope.self, from: rawJSON),
               let sessionID = env.payload.session_id,
-              let cwdString = env.payload.cwd else { return nil }
+              let cwdString = env.payload.cwd else {
+            NSLog("[WARNING] unrecognized claude message")
+            return nil
+        }
         let cwd = URL(fileURLWithPath: cwdString)
         let kind: AgentEventKind?
         switch env.event {
         case "SessionStart":      kind = .sessionStart
         case "SessionEnd":        kind = .sessionEnd(reason: env.payload.reason)
-        case "Stop":              kind = .sessionEnd(reason: nil)
+        case "Stop":              kind = .turnEnd
         case "PreToolUse":
             guard let n = env.payload.tool_name else { return nil }
             kind = .toolStart(name: n)

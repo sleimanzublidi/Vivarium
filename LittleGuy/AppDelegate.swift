@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         director = SceneDirector(library: library,
                                   packsByID: packs,
                                   sceneSize: CGSize(width: 320, height: 160),
-                                  petScale: 0.5)
+                                  petScale: 0.3)
 
         let store = self.store!
         let director = self.director!
@@ -53,12 +53,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let normalizer = self.normalizer
         do {
             server = try SocketServer(socketURL: socketURL) { [store] line in
-                guard let event = normalizer.normalize(line: line) else { return }
-                await store.apply(event)
+                let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
+                if let event = normalizer.normalize(line: line) {
+                    NSLog("[INFO] sock OK agent=\(event.agent.rawValue) kind=\(event.kind) sessionKey=\(event.sessionKey) cwd=\(event.cwd.path)")
+                    await store.apply(event)
+                } else {
+                    NSLog("[WARNING] sock DROPPED (\(line.count)B) — \(preview)")
+                }
             }
             try server.start()
         } catch {
-            NSLog("[LittleGuy] socket startup failed: \(error)")
+            NSLog("[ERROR] socket startup failed: \(error)")
         }
 
         tank = FloatingTank(scene: director.scene)

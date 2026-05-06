@@ -42,9 +42,12 @@ final class ClaudeCodeAdapterTests: XCTestCase {
         XCTAssertEqual(e.kind, .waitingForInput(message: "Waiting for user input"))
     }
 
-    func test_stop_isSessionEnd() throws {
+    func test_stop_isTurnEnd() throws {
+        // `Stop` fires when the agent finishes responding — the session
+        // continues, so we must not map it to .sessionEnd. .turnEnd lets
+        // the store transition state to .idle without removing the pet.
         let e = try XCTUnwrap(try adapt("stop"))
-        XCTAssertEqual(e.kind, .sessionEnd(reason: nil))
+        XCTAssertEqual(e.kind, .turnEnd)
     }
 
     func test_preCompact_isCompacting() throws {

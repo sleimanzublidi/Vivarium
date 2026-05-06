@@ -1,6 +1,6 @@
 import Foundation
 
-enum AgentType: String, Codable, Equatable, Sendable {
+enum AgentType: String, Codable, Hashable, Sendable {
     case claudeCode = "claude-code"
     case copilotCli = "copilot-cli"
 }
@@ -16,6 +16,10 @@ enum AgentEventKind: Equatable, Sendable {
     case subagentStart
     case subagentEnd
     case error(message: String)
+    /// Agent has finished its turn and is no longer actively working.
+    /// Distinct from `.sessionEnd` — the session continues, the user just
+    /// hasn't been asked anything specific. (Claude Code's `Stop` hook.)
+    case turnEnd
 }
 
 struct AgentEvent: Equatable, Sendable {
@@ -33,7 +37,7 @@ extension AgentEventKind: Codable {
     private enum CodingKeys: String, CodingKey { case tag, name, success, reason, text, message }
     private enum Tag: String, Codable {
         case sessionStart, sessionEnd, toolStart, toolEnd, promptSubmit
-        case waitingForInput, compacting, subagentStart, subagentEnd, error
+        case waitingForInput, compacting, subagentStart, subagentEnd, error, turnEnd
     }
 
     func encode(to encoder: Encoder) throws {
@@ -55,6 +59,7 @@ extension AgentEventKind: Codable {
         case .subagentEnd: try c.encode(Tag.subagentEnd, forKey: .tag)
         case .error(let m):
             try c.encode(Tag.error, forKey: .tag); try c.encode(m, forKey: .message)
+        case .turnEnd: try c.encode(Tag.turnEnd, forKey: .tag)
         }
     }
 
@@ -74,6 +79,7 @@ extension AgentEventKind: Codable {
         case .subagentStart: self = .subagentStart
         case .subagentEnd: self = .subagentEnd
         case .error: self = .error(message: try c.decode(String.self, forKey: .message))
+        case .turnEnd: self = .turnEnd
         }
     }
 }

@@ -18,6 +18,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
 
     private struct Payload: Decodable {
         let timestamp: String?
+        let sessionId: String?
         let cwd: String?
         let prompt: String?
         let toolName: String?
@@ -26,6 +27,40 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         let error: CopilotError?
         let reason: String?
         let initialPrompt: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case timestamp, sessionId, cwd, prompt, toolName, toolArgs
+            case toolResult, error, reason, initialPrompt
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            // Copilot CLI sends `timestamp` as ms-since-epoch (number) in
+            // recent versions but used to send it as ISO-8601 (string) — and
+            // our test fixtures still use the string form. Accept either so
+            // the whole envelope doesn't get rejected on a type mismatch.
+            timestamp = Self.decodeFlexibleString(c, forKey: .timestamp)
+            sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+            cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+            prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+            toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+            toolArgs = try c.decodeIfPresent(String.self, forKey: .toolArgs)
+            toolResult = try c.decodeIfPresent(ToolResult.self, forKey: .toolResult)
+            error = try c.decodeIfPresent(CopilotError.self, forKey: .error)
+            reason = try c.decodeIfPresent(String.self, forKey: .reason)
+            initialPrompt = try c.decodeIfPresent(String.self, forKey: .initialPrompt)
+        }
+
+        private static func decodeFlexibleString(_ c: KeyedDecodingContainer<CodingKeys>,
+                                                 forKey key: CodingKeys) -> String?
+        {
+            if let s = try? c.decode(String.self, forKey: key) { return s }
+            if let i = try? c.decode(Int64.self, forKey: key) { return String(i) }
+            if let d = try? c.decode(Double.self, forKey: key) {
+                return String(format: "%.0f", d)
+            }
+            return nil
+        }
     }
 
     private struct ToolResult: Decodable {
@@ -53,12 +88,27 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
 
     func adapt(rawJSON: Data, receivedAt: Date) -> AgentEvent? {
         guard let env = try? JSONDecoder().decode(Envelope.self, from: rawJSON),
-              let cwdString = env.payload.cwd else { return nil }
+              let cwdString = env.payload.cwd else {
+            NSLog("[WARNING] unrecognized copilot message")
+            return nil
+        }
         let cwd = URL(fileURLWithPath: cwdString)
         let origin = originKey(cwd: cwdString, ppid: env.ppid)
 
-        // Resolve / mutate the synthetic key map under the lock.
+        // Resolve session key. Recent Copilot CLI versions ship a stable
+        // `payload.sessionId` — prefer it when present (cleaner, survives
+        // `--resume`). Older versions don't include it, so we keep the
+        // legacy (cwd, ppid, timestamp) → sha1 synthesis as a fallback.
         let sessionKey: String = {
+            if let id = env.payload.sessionId, !id.isEmpty {
+                lock.lock(); defer { lock.unlock() }
+                if env.event == "sessionEnd" {
+                    keysByOrigin.removeValue(forKey: origin)
+                } else {
+                    keysByOrigin[origin] = id
+                }
+                return id
+            }
             lock.lock(); defer { lock.unlock() }
             switch env.event {
             case "sessionStart":

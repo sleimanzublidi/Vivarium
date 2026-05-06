@@ -4,9 +4,11 @@ import SpriteKit
 final class PetNode: SKSpriteNode {
     let sessionKey: String
     private(set) var pack: PetPack
-    private var currentState: PetState = .idle
+    private(set) var currentState: PetState = .idle
     private weak var library: PetLibrary?
     private static let actionKey = "stateAnimation"
+
+    let balloon = BalloonNode()
 
     init(sessionKey: String, pack: PetPack, library: PetLibrary, petScale: CGFloat = 1.0) {
         self.sessionKey = sessionKey
@@ -16,6 +18,7 @@ final class PetNode: SKSpriteNode {
         let size = CGSize(width:  CGFloat(CodexLayout.frameWidth)  * petScale,
                           height: CGFloat(CodexLayout.frameHeight) * petScale)
         super.init(texture: textures.first, color: .clear, size: size)
+        addChild(balloon)
         play(state: .idle, force: true)
     }
 
@@ -23,6 +26,26 @@ final class PetNode: SKSpriteNode {
 
     func play(state: PetState) {
         play(state: state, force: false)
+    }
+
+    /// Play the waving animation once as a hello, then settle into
+    /// `steadyState`. Used at spawn so a brand-new pet greets the user
+    /// before going about its business. Cancels any in-flight animation.
+    func playSpawnGreeting(then steadyState: PetState) {
+        guard let library else { return }
+        let textures = library.textures(for: .waving, in: pack)
+        let spec = CodexLayout.rowSpec(for: .waving)
+        let timePerFrame = Double(spec.durationMs) / Double(spec.frames) / 1000.0
+        let waveOnce = SKAction.animate(with: textures,
+                                        timePerFrame: timePerFrame,
+                                        resize: false,
+                                        restore: false)
+        currentState = .waving
+        removeAction(forKey: Self.actionKey)
+        let transition = SKAction.run { [weak self] in
+            self?.play(state: steadyState, force: true)
+        }
+        run(SKAction.sequence([waveOnce, transition]), withKey: Self.actionKey)
     }
 
     private func play(state: PetState, force: Bool) {

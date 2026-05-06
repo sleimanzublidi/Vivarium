@@ -77,4 +77,31 @@ final class CopilotCLIAdapterTests: XCTestCase {
     func test_malformed_returnsNil() throws {
         XCTAssertNil(try adapt("malformed"))
     }
+
+    /// Captured from a live Copilot CLI 0.0.396 run. `timestamp` is a number
+    /// (ms-since-epoch), not the ISO-8601 string the older fixtures use.
+    /// Pre-fix: this dropped silently because of the type mismatch in
+    /// `Payload`, which is why no Copilot pets ever appeared.
+    func test_realCopilotSessionStart_acceptsNumericTimestamp() throws {
+        let e = try XCTUnwrap(try adapt("session-start-real"))
+        XCTAssertEqual(e.kind, .sessionStart)
+        XCTAssertEqual(e.cwd, URL(fileURLWithPath: "/Users/sleimanzublidi/Source/OneDrive.iOS"))
+    }
+
+    /// When Copilot includes its own `sessionId`, prefer it over the
+    /// synthesized sha1 — it's stable across `--resume` and matches the
+    /// id Copilot uses internally.
+    func test_realCopilotSessionStart_usesProvidedSessionId() throws {
+        let e = try XCTUnwrap(try adapt("session-start-real"))
+        XCTAssertEqual(e.sessionKey, "6654462f-8c50-4a2b-a421-1ea31d2b0ba0")
+    }
+
+    /// Subsequent events for the same Copilot session keep matching the
+    /// sessionId the sessionStart established.
+    func test_realCopilot_sessionEnd_carriesSameKey() throws {
+        let s = try XCTUnwrap(try adapt("session-start-real"))
+        let e = try XCTUnwrap(try adapt("session-end-real"))
+        XCTAssertEqual(s.sessionKey, e.sessionKey)
+        XCTAssertEqual(e.kind, .sessionEnd(reason: "user_exit"))
+    }
 }

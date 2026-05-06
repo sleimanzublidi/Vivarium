@@ -23,7 +23,10 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.first?.state, .idle)
     }
 
-    func test_toolStart_setsRunning_postToolEnd_returnsToIdle() async {
+    func test_toolStart_setsRunning_toolEndSuccess_keepsRunning() async {
+        // toolEnd success no longer drops state to .idle — the agent is
+        // typically still busy between tool calls within a turn. The pet
+        // transitions out of .running on .turnEnd / failure / next tool.
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
                                  kind: .sessionStart, detail: nil, at: clock.now))
@@ -34,9 +37,135 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snap.first?.state, .running)
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
-                                 kind: .toolEnd(name: "Bash", success: true), detail: nil, at: clock.now))
+                                 kind: .toolEnd(name: "Bash", success: true),
+                                 detail: nil, at: clock.now))
         snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .running,
+                       "successful toolEnd should keep state at .running so the pet looks busy between tools")
+    }
+
+    func test_toolEndFailure_setsFailed() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .sessionStart, detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"), detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolEnd(name: "Bash", success: false),
+                                 detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .failed)
+    }
+
+    // MARK: - Idle-timeout fallback
+
+    private func makeStoreWithIdleFallback(_ timeout: TimeInterval) -> SessionStore {
+        let clockRef = clock!
+        return SessionStore(resolver: resolver,
+                            idleTimeout: 600,
+                            agentIdleTimeout: timeout,
+                            now: { clockRef.now })
+    }
+
+    /// After `agentIdleTimeout` with no events, a session in `.running`
+    /// should drop to `.idle` so the pet doesn't stay forever showing the
+    /// last tool name (Copilot has no Stop hook; Claude can miss one).
+    func test_idleTimeout_transitionsRunningToIdle() async throws {
+        let store = makeStoreWithIdleFallback(0.1)
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: nil, at: clock.now))
+        let beforeState = await store.snapshot().first?.state
+        XCTAssertEqual(beforeState, .running)
+
+        try await Task.sleep(nanoseconds: 300_000_000)   // 300 ms
+        let afterState = await store.snapshot().first?.state
+        XCTAssertEqual(afterState, .idle,
+                       "should auto-idle once agentIdleTimeout passes with no events")
+    }
+
+    /// Attention states (`.waiting`, `.failed`) must never auto-idle —
+    /// the user is expected to act on them.
+    func test_idleTimeout_doesNotApplyToAttentionStates() async throws {
+        let store = makeStoreWithIdleFallback(0.1)
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .waitingForInput(message: "what now?"),
+                                 detail: nil, at: clock.now))
+        let waitingBefore = await store.snapshot().first?.state
+        XCTAssertEqual(waitingBefore, .waiting)
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let waitingAfter = await store.snapshot().first?.state
+        XCTAssertEqual(waitingAfter, .waiting,
+                       ".waiting must persist even past the idle timeout")
+
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k2",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .error(message: "boom"),
+                                 detail: nil, at: clock.now))
+        let failedBefore = await store.snapshot().first(where: { $0.sessionKey == "k2" })?.state
+        XCTAssertEqual(failedBefore, .failed)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let failedAfter = await store.snapshot().first(where: { $0.sessionKey == "k2" })?.state
+        XCTAssertEqual(failedAfter, .failed,
+                       ".failed must persist even past the idle timeout")
+    }
+
+    /// Each new event resets the idle timer — a steady stream of events
+    /// keeps the pet active.
+    func test_idleTimeout_resetByEachEvent() async throws {
+        let store = makeStoreWithIdleFallback(0.2)
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: nil, at: clock.now))
+        try await Task.sleep(nanoseconds: 100_000_000)   // 100 ms
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolEnd(name: "Bash", success: true),
+                                 detail: nil, at: clock.now))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let stateAfter = await store.snapshot().first?.state
+        XCTAssertEqual(stateAfter, .running,
+                       "fresh event should have reset the timer")
+    }
+
+    func test_turnEnd_setsIdle_withoutRemovingSession() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .sessionStart, detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"), detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolEnd(name: "Bash", success: true),
+                                 detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .turnEnd, detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.count, 1, "turnEnd must NOT remove the session")
         XCTAssertEqual(snap.first?.state, .idle)
+    }
+
+    func test_toolStart_setsBalloonToFriendlyToolName() async {
+        // The balloon text shows a gerund-style display string (mapped via
+        // ToolDisplayName), not the raw tool identifier the agent uses.
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .sessionStart, detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "WebFetch"),
+                                 detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Fetching")
+        XCTAssertEqual(snap.first?.lastBalloon?.postedAt, clock.now)
     }
 
     func test_promptSubmit_setsReview() async {
