@@ -1,0 +1,11 @@
+{
+  "agent": "copilot-cli",
+  "event": "errorOccurred",
+  "pid": 22000,
+  "ppid": 21000,
+  "payload": {
+    "timestamp": "2026-05-06T10:00:10Z",
+    "cwd": "/Users/me/Source/bar",
+    "error": { "name": "ExecError", "message": "exit 1", "stack": "..." }
+  }
+}

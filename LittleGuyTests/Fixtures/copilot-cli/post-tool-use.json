@@ -1,0 +1,13 @@
+{
+  "agent": "copilot-cli",
+  "event": "postToolUse",
+  "pid": 22000,
+  "ppid": 21000,
+  "payload": {
+    "timestamp": "2026-05-06T10:00:09Z",
+    "cwd": "/Users/me/Source/bar",
+    "toolName": "bash",
+    "toolArgs": "{\"command\":\"go test ./...\"}",
+    "toolResult": { "resultType": "success", "textResultForLlm": "ok" }
+  }
+}

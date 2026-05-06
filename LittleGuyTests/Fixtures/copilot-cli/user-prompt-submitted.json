@@ -1,0 +1,11 @@
+{
+  "agent": "copilot-cli",
+  "event": "userPromptSubmitted",
+  "pid": 22000,
+  "ppid": 21000,
+  "payload": {
+    "timestamp": "2026-05-06T10:00:01Z",
+    "cwd": "/Users/me/Source/bar",
+    "prompt": "rerun the failing test"
+  }
+}
