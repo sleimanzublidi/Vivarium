@@ -161,21 +161,21 @@ targets:
     sources:
       - path: LittleGuyTests
         excludes:
-          - "Adapters/Fixtures"
-          - "Pets/Fixtures"
-      - path: LittleGuyTests/Adapters/Fixtures
-        type: folder
-      - path: LittleGuyTests/Pets/Fixtures
+          - "Fixtures"
+      - path: LittleGuyTests/Fixtures
         type: folder
     dependencies:
       - target: LittleGuy
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LittleGuy.app/Contents/MacOS/LittleGuy"
 ```
 
 The two `type: folder` entries are critical — they create folder references in the generated `.xcodeproj` so `Bundle.url(forResource:withExtension:subdirectory:)` works at runtime. Plain source globs would flatten the tree and break that lookup.
+
+A single top-level `LittleGuyTests/Fixtures/` directory is used (rather than separate per-domain `Adapters/Fixtures` and `Pets/Fixtures` dirs) so that XcodeGen's folder references don't collide on the leaf name `Fixtures`. Test fixtures are organized inside as `Fixtures/claude-code/` (CC adapter), `Fixtures/copilot-cli/` (Copilot adapter), `Fixtures/valid-pet/` / `Fixtures/wrong-dim/` etc. (PetLibrary). `LittleGuyTests/Adapters/` and `LittleGuyTests/Pets/` then hold only Swift test sources that get compiled normally.
 
 - [ ] **Step 3: Create the scaffold source files**
 
@@ -808,18 +808,18 @@ git commit -m "feat: add EventAdapter protocol and EventNormalizer dispatcher"
 ### Task C2: ClaudeCodeAdapter — fixtures and tests
 
 **Files:**
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/session-start.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/pre-tool-use-bash.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/post-tool-use-bash.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/notification.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/stop.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/pre-compact.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/subagent-start.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/subagent-stop.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/user-prompt-submit.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/session-end.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/malformed-empty.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/claude-code/malformed-missing-event.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/session-start.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/pre-tool-use-bash.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/post-tool-use-bash.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/notification.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/stop.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/pre-compact.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/subagent-start.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/subagent-stop.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/user-prompt-submit.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/session-end.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/malformed-empty.json`
+- Create: `LittleGuyTests/Fixtures/claude-code/malformed-missing-event.json`
 - Create: `LittleGuyTests/Adapters/ClaudeCodeAdapterTests.swift`
 
 - [ ] **Step 1: Add fixtures**
@@ -983,7 +983,7 @@ These mirror the envelope our `notify` helper will write. The outer envelope is 
 }
 ```
 
-No project edit needed — `project.yml` declares `LittleGuyTests/Adapters/Fixtures` as a `type: folder` source, so Xcode picks up everything under it as a folder reference automatically. Just creating the files on disk is sufficient. (If you ever rename or relocate the top-level fixtures directory, re-run `xcodegen generate`.)
+No project edit needed — `project.yml` declares `LittleGuyTests/Fixtures` as a `type: folder` source, so Xcode picks up everything under it as a folder reference automatically. Just creating the files on disk is sufficient. (If you ever rename or relocate the top-level fixtures directory, re-run `xcodegen generate`.)
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -1156,13 +1156,13 @@ git commit -m "feat: add ClaudeCodeAdapter with fixture-driven tests"
 ### Task C3: CopilotCLIAdapter — fixtures, tests, synthetic session key
 
 **Files:**
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/session-start.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/user-prompt-submitted.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/pre-tool-use.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/post-tool-use.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/error-occurred.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/session-end.json`
-- Create: `LittleGuyTests/Adapters/Fixtures/copilot-cli/malformed.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/session-start.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/user-prompt-submitted.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/pre-tool-use.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/post-tool-use.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/error-occurred.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/session-end.json`
+- Create: `LittleGuyTests/Fixtures/copilot-cli/malformed.json`
 - Create: `LittleGuyTests/Adapters/CopilotCLIAdapterTests.swift`
 
 - [ ] **Step 1: Add fixtures**
@@ -1963,18 +1963,18 @@ git commit -m "chore: vendor openpets sample-pet into Resources/Pets"
 **Files:**
 - Create: `LittleGuy/Pets/PetLibrary.swift`
 - Create: `LittleGuyTests/Pets/PetLibraryTests.swift`
-- Create: `LittleGuyTests/Pets/Fixtures/valid-pet/pet.json`
-- Create: `LittleGuyTests/Pets/Fixtures/valid-pet/spritesheet.png` (copy of the openpets sample)
+- Create: `LittleGuyTests/Fixtures/valid-pet/pet.json`
+- Create: `LittleGuyTests/Fixtures/valid-pet/spritesheet.png` (copy of the openpets sample)
 
 - [ ] **Step 1: Add the valid-pet fixture**
 
 ```bash
-mkdir -p LittleGuyTests/Pets/Fixtures/valid-pet
-cp /tmp/openpets-inspect/examples/sample-pet/pet.json        LittleGuyTests/Pets/Fixtures/valid-pet/
-cp /tmp/openpets-inspect/examples/sample-pet/spritesheet.png LittleGuyTests/Pets/Fixtures/valid-pet/
+mkdir -p LittleGuyTests/Fixtures/valid-pet
+cp /tmp/openpets-inspect/examples/sample-pet/pet.json        LittleGuyTests/Fixtures/valid-pet/
+cp /tmp/openpets-inspect/examples/sample-pet/spritesheet.png LittleGuyTests/Fixtures/valid-pet/
 ```
 
-No project edit needed — `project.yml` declares `LittleGuyTests/Pets/Fixtures` as a `type: folder` source on the LittleGuyTests target, so this is already a folder reference.
+No project edit needed — `project.yml` declares `LittleGuyTests/Fixtures/pets` as a `type: folder` source on the LittleGuyTests target, so this is already a folder reference.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -2118,17 +2118,17 @@ git commit -m "feat: add PetLibrary with pack loading and row slicing"
 ### Task E3: PetLibrary — invalid pack rejection
 
 **Files:**
-- Create: `LittleGuyTests/Pets/Fixtures/missing-manifest/spritesheet.png` (copy)
-- Create: `LittleGuyTests/Pets/Fixtures/invalid-manifest/pet.json` (broken JSON)
-- Create: `LittleGuyTests/Pets/Fixtures/invalid-manifest/spritesheet.png` (copy)
-- Create: `LittleGuyTests/Pets/Fixtures/missing-spritesheet/pet.json`
-- Create: `LittleGuyTests/Pets/Fixtures/wrong-dim/pet.json`
-- Create: `LittleGuyTests/Pets/Fixtures/wrong-dim/spritesheet.png` (an obviously-wrong size, e.g. 100×100; generate via `sips` from any image)
+- Create: `LittleGuyTests/Fixtures/missing-manifest/spritesheet.png` (copy)
+- Create: `LittleGuyTests/Fixtures/invalid-manifest/pet.json` (broken JSON)
+- Create: `LittleGuyTests/Fixtures/invalid-manifest/spritesheet.png` (copy)
+- Create: `LittleGuyTests/Fixtures/missing-spritesheet/pet.json`
+- Create: `LittleGuyTests/Fixtures/wrong-dim/pet.json`
+- Create: `LittleGuyTests/Fixtures/wrong-dim/spritesheet.png` (an obviously-wrong size, e.g. 100×100; generate via `sips` from any image)
 
 - [ ] **Step 1: Add the fixtures**
 
 ```bash
-cd LittleGuyTests/Pets/Fixtures
+cd LittleGuyTests/Fixtures/pets
 mkdir -p missing-manifest invalid-manifest missing-spritesheet wrong-dim
 cp valid-pet/spritesheet.png missing-manifest/
 
