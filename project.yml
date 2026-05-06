@@ -54,16 +54,13 @@ targets:
     sources:
       - path: LittleGuyTests
         excludes:
-          - "Adapters"
-          - "Pets"
-      - path: LittleGuyTests/Adapters
-        type: folder
-      - path: LittleGuyTests/Pets
+          - "Fixtures"
+      - path: LittleGuyTests/Fixtures
         type: folder
     dependencies:
       - target: LittleGuy
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LittleGuy.app/Contents/MacOS/LittleGuy"
-        GENERATE_INFOPLIST_FILE: YES
