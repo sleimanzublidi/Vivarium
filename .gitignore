@@ -1,0 +1,57 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Brainstorming companion (skill state)
+.superpowers/
+
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj
+
+# Xcode profiling
+timeline.xctimeline
+playground.xcworkspace
+
+# CocoaPods (if ever used)
+Pods/
+
+# Carthage (if ever used)
+Carthage/Build/
+
+# fastlane (if ever used)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# IDE
+.vscode/
+.idea/
+
+# Logs / scratch
+*.log
+*.tmp
