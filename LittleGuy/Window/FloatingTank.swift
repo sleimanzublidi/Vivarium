@@ -3,6 +3,7 @@ import AppKit
 import SpriteKit
 
 final class FloatingTank: NSWindow {
+    private static let frameAutosaveName: NSWindow.FrameAutosaveName = "LittleGuyFloatingTank"
     private let skView: SKView
 
     init(scene: SKScene, contentRect: NSRect = NSRect(x: 200, y: 200, width: 600, height: 220)) {
@@ -26,6 +27,12 @@ final class FloatingTank: NSWindow {
         self.isMovableByWindowBackground = true
         self.acceptsMouseMovedEvents = true
         self.isReleasedWhenClosed = false
+
+        // Persist + restore frame across launches. setFrameAutosaveName arms
+        // future saves on every move/resize; setFrameUsingName applies any
+        // previously-saved frame now (no-op on first launch).
+        self.setFrameAutosaveName(Self.frameAutosaveName)
+        _ = self.setFrameUsingName(Self.frameAutosaveName)
     }
 
     override var canBecomeKey: Bool { true }

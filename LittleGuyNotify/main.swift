@@ -87,7 +87,7 @@ if connectResult != 0 {
     if errno != EINPROGRESS { exit(0) }
     var writeSet = fd_set()
     // FD_ZERO / FD_SET are macros not visible in Swift; implement manually.
-    withUnsafeMutableBytes(of: &writeSet) { ptr in
+    _ = withUnsafeMutableBytes(of: &writeSet) { ptr in
         ptr.initializeMemory(as: UInt8.self, repeating: 0)
     }
     let words = MemoryLayout<fd_set>.size / 4

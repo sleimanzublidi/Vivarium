@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var director: SceneDirector!
     private var tank: FloatingTank!
     private var library: PetLibrary!
+    private var statusItem: NSStatusItem!
     private let normalizer = EventNormalizer(adapters: [
         ClaudeCodeAdapter(),
         CopilotCLIAdapter(),
@@ -35,8 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   packsByID: packs,
                                   sceneSize: CGSize(width: 600, height: 220))
 
-        // Subscribe to store events. The AsyncStream is consumed on MainActor so that
-        // calls into SceneDirector (and therefore SpriteKit) happen on the main thread.
         let store = self.store!
         let director = self.director!
         Task { @MainActor in
@@ -63,13 +62,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         tank = FloatingTank(scene: director.scene)
         tank.makeKeyAndOrderFront(nil)
+
+        installMenuBarItem()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false   // menu bar app: stay alive when window closes (Plan 2 introduces the menu bar)
+        false   // menu bar app: stay alive when the floating window closes
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         server?.stop()
+    }
+
+    // MARK: - Menu bar
+
+    private func installMenuBarItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "pawprint.fill",
+                                   accessibilityDescription: "LittleGuy")
+            button.image?.isTemplate = true
+        }
+        let menu = NSMenu()
+        let toggle = menu.addItem(withTitle: "Show / Hide Tank",
+                                  action: #selector(toggleTank),
+                                  keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(.separator())
+        let quit = menu.addItem(withTitle: "Quit LittleGuy",
+                                action: #selector(quitApp),
+                                keyEquivalent: "q")
+        quit.target = self
+        item.menu = menu
+        self.statusItem = item
+    }
+
+    @objc private func toggleTank() {
+        guard let tank = self.tank else { return }
+        if tank.isVisible {
+            tank.orderOut(nil)
+        } else {
+            tank.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
 }
