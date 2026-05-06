@@ -134,21 +134,32 @@ extension PetLibrary {
         return DiscoveryOutcome(packs: packs.sorted { $0.manifest.id < $1.manifest.id }, issues: issues)
     }
 
-    /// Convenience: load both bundled and user-installed packs.
-    func discoverAll(userPetsDir: URL, bundle: Bundle = .main) -> DiscoveryOutcome {
+    /// Core: discover from explicit user + bundled directories. User packs are loaded
+    /// first so they take precedence on duplicate IDs and appear first in the result
+    /// (which AppDelegate uses to pick a default pet). Bundled packs fill in any IDs
+    /// the user hasn't shadowed.
+    func discoverAll(bundledPetsDir: URL?, userPetsDir: URL) -> DiscoveryOutcome {
         var combined: [PetPack] = []
         var issues: [DiscoveryIssue] = []
         var seen = Set<String>()
-        if let bundled = bundle.url(forResource: "Pets", withExtension: nil) {
-            let r = discoverPacks(in: bundled)
-            for p in r.packs where seen.insert(p.manifest.id).inserted { combined.append(p) }
-            issues.append(contentsOf: r.issues)
-        }
         if FileManager.default.fileExists(atPath: userPetsDir.path) {
             let r = discoverPacks(in: userPetsDir)
             for p in r.packs where seen.insert(p.manifest.id).inserted { combined.append(p) }
             issues.append(contentsOf: r.issues)
         }
+        if let bundled = bundledPetsDir,
+           FileManager.default.fileExists(atPath: bundled.path) {
+            let r = discoverPacks(in: bundled)
+            for p in r.packs where seen.insert(p.manifest.id).inserted { combined.append(p) }
+            issues.append(contentsOf: r.issues)
+        }
         return DiscoveryOutcome(packs: combined, issues: issues)
+    }
+
+    /// Convenience for app code: locate the bundled `Pets/` folder via the supplied
+    /// Bundle and delegate.
+    func discoverAll(userPetsDir: URL, bundle: Bundle = .main) -> DiscoveryOutcome {
+        let bundled = bundle.url(forResource: "Pets", withExtension: nil)
+        return discoverAll(bundledPetsDir: bundled, userPetsDir: userPetsDir)
     }
 }

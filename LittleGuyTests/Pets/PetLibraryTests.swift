@@ -90,3 +90,61 @@ extension PetLibraryTests {
         XCTAssertTrue(outcome.issues.contains { if case .duplicateID = $0.issue { return true } else { return false } })
     }
 }
+
+extension PetLibraryTests {
+    // Returns a temp directory containing a valid pack with the given id,
+    // copied from the openpets sample spritesheet for image validity.
+    fileprivate func makeTempPackDir(id: String, displayName: String) -> URL {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pl-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let pet = parent.appendingPathComponent(id)
+        try! FileManager.default.createDirectory(at: pet, withIntermediateDirectories: true)
+        let manifest = #"{ "id": "\#(id)", "displayName": "\#(displayName)" }"#
+        try! manifest.data(using: .utf8)!.write(to: pet.appendingPathComponent("pet.json"))
+        let png = fixturesURL().appendingPathComponent("valid-pet/spritesheet.png")
+        try! FileManager.default.copyItem(at: png, to: pet.appendingPathComponent("spritesheet.png"))
+        return parent
+    }
+
+    func test_discoverAll_userPacksTakePrecedence_andComeFirst() {
+        let bundled = makeTempPackDir(id: "sample-pet", displayName: "Sample")
+        let user = makeTempPackDir(id: "clawd", displayName: "Clawd")
+        defer {
+            try? FileManager.default.removeItem(at: bundled)
+            try? FileManager.default.removeItem(at: user)
+        }
+
+        let outcome = PetLibrary().discoverAll(bundledPetsDir: bundled, userPetsDir: user)
+
+        // User pack must be at index 0 — that's what AppDelegate uses for the default.
+        XCTAssertEqual(outcome.packs.first?.manifest.id, "clawd")
+        XCTAssertEqual(outcome.packs.map { $0.manifest.id }, ["clawd", "sample-pet"])
+    }
+
+    func test_discoverAll_userOverridesBundled_onSameID() {
+        // Both dirs have a pack with id "shared" — user wins.
+        let bundled = makeTempPackDir(id: "shared", displayName: "BUNDLED VARIANT")
+        let user = makeTempPackDir(id: "shared", displayName: "USER VARIANT")
+        defer {
+            try? FileManager.default.removeItem(at: bundled)
+            try? FileManager.default.removeItem(at: user)
+        }
+
+        let outcome = PetLibrary().discoverAll(bundledPetsDir: bundled, userPetsDir: user)
+
+        XCTAssertEqual(outcome.packs.count, 1)
+        XCTAssertEqual(outcome.packs.first?.manifest.id, "shared")
+        XCTAssertEqual(outcome.packs.first?.manifest.displayName, "USER VARIANT")
+    }
+
+    func test_discoverAll_bundledOnly_whenNoUserPacks() {
+        let bundled = makeTempPackDir(id: "sample-pet", displayName: "Sample")
+        let userMissing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does-not-exist-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: bundled) }
+
+        let outcome = PetLibrary().discoverAll(bundledPetsDir: bundled, userPetsDir: userMissing)
+        XCTAssertEqual(outcome.packs.map { $0.manifest.id }, ["sample-pet"])
+    }
+}
