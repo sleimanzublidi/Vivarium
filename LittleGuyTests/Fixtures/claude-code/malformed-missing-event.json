@@ -1,0 +1,4 @@
+{
+  "agent": "claude-code",
+  "payload": { "session_id": "x", "cwd": "/tmp" }
+}

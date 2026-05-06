@@ -1,0 +1,10 @@
+{
+  "agent": "claude-code",
+  "event": "SessionEnd",
+  "payload": {
+    "session_id": "11111111-1111-1111-1111-111111111111",
+    "cwd": "/Users/me/Source/foo",
+    "hook_event_name": "SessionEnd",
+    "reason": "exit"
+  }
+}
