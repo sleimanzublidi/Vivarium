@@ -8,15 +8,21 @@ final class SceneDirector {
     private var packsByID: [String: PetPack]
     private var nodes: [String: PetNode] = [:]   // sessionKey → PetNode
     private let groundY: CGFloat
+    private let petScale: CGFloat
 
-    init(library: PetLibrary, packsByID: [String: PetPack], sceneSize: CGSize) {
+    init(library: PetLibrary,
+         packsByID: [String: PetPack],
+         sceneSize: CGSize,
+         petScale: CGFloat = 1.0)
+    {
         self.library = library
         self.packsByID = packsByID
+        self.petScale = petScale
         let scene = SKScene(size: sceneSize)
         scene.scaleMode = .aspectFit
         scene.backgroundColor = .black
         self.scene = scene
-        self.groundY = CGFloat(CodexLayout.frameHeight) / 2 + 8
+        self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + 8
     }
 
     /// Add the pet for a new session, or update its state if it already exists.
@@ -27,7 +33,7 @@ final class SceneDirector {
         }
         let pack = packsByID[session.project.petId] ?? packsByID.first?.value
         guard let pack else { return }   // no pets installed at all
-        let node = PetNode(sessionKey: session.sessionKey, pack: pack, library: library)
+        let node = PetNode(sessionKey: session.sessionKey, pack: pack, library: library, petScale: petScale)
         node.position = nextSlot()
         scene.addChild(node)
         nodes[session.sessionKey] = node
@@ -41,7 +47,7 @@ final class SceneDirector {
 
     private func nextSlot() -> CGPoint {
         let count = nodes.count
-        let spacing: CGFloat = CGFloat(CodexLayout.frameWidth) * 0.6
+        let spacing: CGFloat = CGFloat(CodexLayout.frameWidth) * 0.6 * petScale
         let baseX: CGFloat = spacing
         return CGPoint(x: baseX + spacing * CGFloat(count), y: groundY)
     }

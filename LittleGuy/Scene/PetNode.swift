@@ -8,13 +8,14 @@ final class PetNode: SKSpriteNode {
     private weak var library: PetLibrary?
     private static let actionKey = "stateAnimation"
 
-    init(sessionKey: String, pack: PetPack, library: PetLibrary) {
+    init(sessionKey: String, pack: PetPack, library: PetLibrary, petScale: CGFloat = 1.0) {
         self.sessionKey = sessionKey
         self.pack = pack
         self.library = library
         let textures = library.textures(for: .idle, in: pack)
-        super.init(texture: textures.first, color: .clear,
-                   size: CGSize(width: CodexLayout.frameWidth, height: CodexLayout.frameHeight))
+        let size = CGSize(width:  CGFloat(CodexLayout.frameWidth)  * petScale,
+                          height: CGFloat(CodexLayout.frameHeight) * petScale)
+        super.init(texture: textures.first, color: .clear, size: size)
         play(state: .idle, force: true)
     }
 

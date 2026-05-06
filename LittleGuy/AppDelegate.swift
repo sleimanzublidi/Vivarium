@@ -34,7 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         director = SceneDirector(library: library,
                                   packsByID: packs,
-                                  sceneSize: CGSize(width: 600, height: 220))
+                                  sceneSize: CGSize(width: 600, height: 220),
+                                  petScale: 0.5)
 
         let store = self.store!
         let director = self.director!

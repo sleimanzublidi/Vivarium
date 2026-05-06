@@ -33,4 +33,20 @@ final class SceneDirectorTests: XCTestCase {
         director.remove(sessionKey: "k1")
         XCTAssertEqual(director.scene.children.filter { $0 is PetNode }.count, 0)
     }
+
+    func test_petScale_propagatesToSpawnedPet() {
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 0.5)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let session = Session(agent: .claudeCode, sessionKey: "k1",
+                              project: project, startedAt: Date())
+        director.addOrUpdate(session: session)
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first
+        XCTAssertEqual(pet?.size.width,  CGFloat(CodexLayout.frameWidth)  * 0.5)
+        XCTAssertEqual(pet?.size.height, CGFloat(CodexLayout.frameHeight) * 0.5)
+    }
 }
