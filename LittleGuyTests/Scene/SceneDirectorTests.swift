@@ -14,7 +14,8 @@ final class SceneDirectorTests: XCTestCase {
     func test_addPet_increasesNodeCount() {
         let director = SceneDirector(library: PetLibrary(),
                                      packsByID: ["sample-pet": validPack()],
-                                     sceneSize: CGSize(width: 600, height: 200))
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
         let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"), label: "repo", petId: "sample-pet")
         let session = Session(agent: .claudeCode, sessionKey: "k1", project: project,
                               startedAt: Date())
@@ -25,7 +26,8 @@ final class SceneDirectorTests: XCTestCase {
     func test_remove_removesNode() {
         let director = SceneDirector(library: PetLibrary(),
                                      packsByID: ["sample-pet": validPack()],
-                                     sceneSize: CGSize(width: 600, height: 200))
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
         let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"), label: "repo", petId: "sample-pet")
         let session = Session(agent: .claudeCode, sessionKey: "k1", project: project,
                               startedAt: Date())

@@ -13,7 +13,7 @@ final class SceneDirector {
     init(library: PetLibrary,
          packsByID: [String: PetPack],
          sceneSize: CGSize,
-         petScale: CGFloat = 1.0)
+         petScale: CGFloat)
     {
         self.library = library
         self.packsByID = packsByID
@@ -22,7 +22,7 @@ final class SceneDirector {
         scene.scaleMode = .aspectFit
         scene.backgroundColor = .black
         self.scene = scene
-        self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + 8
+        self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + 4
     }
 
     /// Add the pet for a new session, or update its state if it already exists.
