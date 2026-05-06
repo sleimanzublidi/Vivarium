@@ -111,6 +111,61 @@ final class SessionStoreTests: XCTestCase {
         snap = await store.snapshot()
         XCTAssertEqual(snap.first?.subagentDepth, 1)
     }
+
+    // MARK: - Lenient session creation (sessions that started before the app launched)
+
+    func test_unknownSession_onToolStart_autoCreatesAtRunning() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"), detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.count, 1)
+        XCTAssertEqual(snap.first?.sessionKey, "k-late")
+        XCTAssertEqual(snap.first?.state, .running)
+    }
+
+    func test_unknownSession_onPromptSubmit_autoCreatesAtReview() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .promptSubmit(text: "ping"), detail: "ping", at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .review)
+    }
+
+    func test_unknownSession_onWaitingForInput_autoCreatesAtWaiting() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .waitingForInput(message: "ready?"),
+                                 detail: "ready?", at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .waiting)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "ready?")
+    }
+
+    func test_unknownSession_onError_autoCreatesAtFailed() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .error(message: "boom"), detail: "boom", at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .failed)
+    }
+
+    func test_unknownSession_resolvesProject() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp/project"),
+                                 kind: .toolStart(name: "Bash"), detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.project.url, URL(fileURLWithPath: "/tmp/project"))
+        XCTAssertEqual(snap.first?.project.petId, "sample-pet")  // from setUp's resolver default
+    }
+
+    func test_unknownSession_onSessionEnd_doesNotAutoCreate() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-late",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .sessionEnd(reason: "exit"), detail: nil, at: clock.now))
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.count, 0)   // ending a session we never saw is a no-op
+    }
 }
 
 private final class TestClock: @unchecked Sendable {

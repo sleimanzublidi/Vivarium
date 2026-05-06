@@ -50,33 +50,41 @@ actor SessionStore {
                 emit(.removed(s))
             }
         default:
-            guard var s = sessions[event.sessionKey] else { return }
+            // Lenient mode: if we don't know this session yet, treat the event
+            // as a synthetic start. Catches sessions that began before the app
+            // launched, plus app-crash recovery mid-session.
+            var s: Session
+            let isNew: Bool
+            if let existing = sessions[event.sessionKey] {
+                s = existing
+                isNew = false
+            } else {
+                let project = resolver.resolve(cwd: event.cwd)
+                s = Session(agent: event.agent,
+                            sessionKey: event.sessionKey,
+                            project: project,
+                            startedAt: event.at)
+                isNew = true
+            }
             s.lastEventAt = event.at
             switch event.kind {
-            case .toolStart:
-                s.state = .running
-            case .toolEnd(_, let success):
-                s.state = success ? .idle : .failed
-            case .promptSubmit:
-                s.state = .review
+            case .toolStart:                s.state = .running
+            case .toolEnd(_, let success):  s.state = success ? .idle : .failed
+            case .promptSubmit:             s.state = .review
             case .waitingForInput(let m):
                 s.state = .waiting
                 if let m { s.lastBalloon = BalloonText(text: m, postedAt: event.at) }
-            case .compacting:
-                // compacting means the context window is being trimmed — map to .review (best-fit Codex row)
-                s.state = .review
-            case .subagentStart:
-                s.subagentDepth += 1
-            case .subagentEnd:
-                s.subagentDepth = max(0, s.subagentDepth - 1)
+            case .compacting:               s.state = .review
+            case .subagentStart:            s.subagentDepth += 1
+            case .subagentEnd:              s.subagentDepth = max(0, s.subagentDepth - 1)
             case .error(let m):
                 s.state = .failed
                 s.lastBalloon = BalloonText(text: m, postedAt: event.at)
             case .sessionStart, .sessionEnd:
-                break  // handled in outer switch
+                break  // handled above
             }
             sessions[event.sessionKey] = s
-            emit(.changed(s))
+            emit(isNew ? .added(s) : .changed(s))
         }
     }
 
