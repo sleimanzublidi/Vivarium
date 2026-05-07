@@ -25,6 +25,7 @@ targets:
       - path: LittleGuy
         excludes:
           - "Resources/Pets"
+          - "Resources/AppIcons/AppIcon*.png"
       - path: LittleGuy/Resources/Pets
         type: folder
     info:
@@ -32,6 +33,7 @@ targets:
       properties:
         LSUIElement: true
         CFBundleDisplayName: LittleGuy
+        CFBundleIconFile: AppIcon
         NSHighResolutionCapable: true
     settings:
       base:
