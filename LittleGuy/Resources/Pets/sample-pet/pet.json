@@ -1,5 +1,6 @@
 {
-  "id": "sample-pet",
-  "displayName": "Sample Pet",
-  "description": "A simple generated Codex-compatible OpenPets sample."
+  "id": "bitboy",
+  "displayName": "BitBoy",
+  "description": "A tiny Game Boy-inspired handheld console Codex pet.",
+  "spritesheetPath": "spritesheet.webp"
 }
