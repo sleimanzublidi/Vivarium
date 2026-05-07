@@ -25,7 +25,7 @@ actor SessionStore {
     ///   - completionAnimationDuration: how long the success animation plays
     ///     before returning to the fallback state.
     init(resolver: ProjectResolver,
-         idleTimeout: TimeInterval,
+         idleTimeout: TimeInterval = 600,
          agentIdleTimeout: TimeInterval = 30,
          completionAnimationDuration: TimeInterval = 1.8,
          now: @escaping @Sendable () -> Date = { Date() })

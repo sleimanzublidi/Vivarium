@@ -1,5 +1,9 @@
 // LittleGuy/Adapters/ClaudeCodeAdapter.swift
 import Foundation
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "ClaudeCodeAdapter")
 
 struct ClaudeCodeAdapter: EventAdapter {
     let agentType: AgentType = .claudeCode
@@ -32,7 +36,7 @@ struct ClaudeCodeAdapter: EventAdapter {
         guard let env = try? JSONDecoder().decode(Envelope.self, from: rawJSON),
               let sessionID = env.payload.session_id,
               let cwdString = env.payload.cwd else {
-            NSLog("[WARNING] unrecognized claude message")
+            logger.warning("unrecognized claude message")
             return nil
         }
         let cwd = URL(fileURLWithPath: cwdString)

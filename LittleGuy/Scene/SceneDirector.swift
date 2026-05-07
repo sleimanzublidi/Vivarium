@@ -1,6 +1,10 @@
 // LittleGuy/Scene/SceneDirector.swift
 import Foundation
+import OSLog
 import SpriteKit
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "SceneDirector")
 
 final class SceneDirector {
     let scene: SKScene
@@ -38,8 +42,8 @@ final class SceneDirector {
          petScale: CGFloat,
          maxVisiblePets: Int = 4,
          balloonTTL: TimeInterval = 8.0,
-         petGap: CGFloat = 8,
-         leftMargin: CGFloat = 6)
+         petGap: CGFloat = 16,
+         leftMargin: CGFloat = 10)
     {
         self.library = library
         self.packsByID = packsByID
@@ -64,9 +68,9 @@ final class SceneDirector {
     /// balloon if there's a fresh one.
     func addOrUpdate(session: Session) {
         if let text = session.lastBalloon?.text, !text.isEmpty {
-            NSLog("[Director] \(session.project.label):\(session.agent) \(session.project.petId) \(session.state.rawValue) '\(text)'")
+            logger.debug("\(session.project.label, privacy: .public):\(session.agent.rawValue, privacy: .public) \(session.project.petId, privacy: .public) \(session.state.rawValue, privacy: .public) '\(text, privacy: .public)'")
         } else {
-            NSLog("[Director] \(session.project.label):\(session.agent) \(session.project.petId) \(session.state.rawValue)")
+            logger.debug("\(session.project.label, privacy: .public):\(session.agent.rawValue, privacy: .public) \(session.project.petId, privacy: .public) \(session.state.rawValue, privacy: .public)")
         }
 
         sessions[session.sessionKey] = session

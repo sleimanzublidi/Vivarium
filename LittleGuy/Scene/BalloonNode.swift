@@ -18,7 +18,9 @@ final class BalloonNode: SKNode {
     static let tailHeight: CGFloat = 5
     static let edgeMargin: CGFloat = 4
     static let headerBodyGap: CGFloat = 2
-    static let cloudBumpRadius: CGFloat = 7
+    static let cloudBumpRadius: CGFloat = 10
+    static let cloudOutlineWidth: CGFloat = 2
+    static let cloudOutlineColor = NSColor(white: 0.12, alpha: 1)
 
     /// Visual style for the balloon. `.speech` is a rounded rect with a
     /// triangular tail; `.thought` is a cloud body with trailing dots, the
@@ -32,6 +34,7 @@ final class BalloonNode: SKNode {
     private static let headerFontSize: CGFloat = 9
     private static let dismissActionKey = "balloonDismiss"
 
+    private let cloudOutline = SKShapeNode()
     private let background = SKShapeNode()
     private let tail = SKShapeNode()
     private let header: SKLabelNode
@@ -39,16 +42,7 @@ final class BalloonNode: SKNode {
     private var style: Style = .speech
 
     override init() {
-        let body = SKLabelNode(fontNamed: "HelveticaNeue")
-        body.fontSize = Self.bodyFontSize
-        body.fontColor = NSColor(white: 0.1, alpha: 1)
-        body.numberOfLines = 0
-        body.preferredMaxLayoutWidth = Self.preferredWidth - Self.padding.width * 2
-        body.horizontalAlignmentMode = .center
-        body.verticalAlignmentMode = .center
-        self.body = body
-
-        let header = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
+        let header = SKLabelNode(fontNamed: Self.roundedFontName(size: Self.headerFontSize, weight: .bold))
         header.fontSize = Self.headerFontSize
         header.fontColor = NSColor(white: 0.35, alpha: 1)
         header.numberOfLines = 1
@@ -56,6 +50,16 @@ final class BalloonNode: SKNode {
         header.horizontalAlignmentMode = .center
         header.verticalAlignmentMode = .center
         self.header = header
+
+        let body = SKLabelNode(fontNamed: Self.roundedFontName(size: Self.bodyFontSize, weight: .regular))
+        body.fontSize = Self.bodyFontSize
+        body.fontColor = NSColor(white: 0.1, alpha: 1)
+        body.numberOfLines = 2
+        body.lineBreakMode = .byTruncatingTail
+        body.preferredMaxLayoutWidth = Self.preferredWidth - Self.padding.width * 2
+        body.horizontalAlignmentMode = .center
+        body.verticalAlignmentMode = .center
+        self.body = body
 
         super.init()
 
@@ -66,6 +70,17 @@ final class BalloonNode: SKNode {
         tail.strokeColor = background.strokeColor
         tail.lineWidth = background.lineWidth
 
+        // Hidden until thought-style is requested. Filled with the dark
+        // outline colour and rendered BEHIND `background`; in thought mode
+        // its path is the body's path stroked-to-fill, so the outer ring
+        // peeks out around `background` to form a clean cloud outline
+        // without internal arcs from overlapping bump subpaths.
+        cloudOutline.fillColor = Self.cloudOutlineColor
+        cloudOutline.strokeColor = .clear
+        cloudOutline.lineWidth = 0
+        cloudOutline.isHidden = true
+
+        addChild(cloudOutline)
         addChild(background)
         addChild(tail)
         addChild(header)
@@ -138,10 +153,15 @@ final class BalloonNode: SKNode {
 
         switch style {
         case .speech:
+            cloudOutline.isHidden = true
+            background.strokeColor = NSColor(white: 0.6, alpha: 1)
+            background.lineWidth = 0.5
             background.path = CGPath(roundedRect: g.bubbleRect,
                                      cornerWidth: Self.cornerRadius,
                                      cornerHeight: Self.cornerRadius,
                                      transform: nil)
+            tail.strokeColor = background.strokeColor
+            tail.lineWidth = background.lineWidth
             let tailPath = CGMutablePath()
             tailPath.move(to: g.tailBaseLeft)
             tailPath.addLine(to: g.tailBaseRight)
@@ -149,84 +169,132 @@ final class BalloonNode: SKNode {
             tailPath.closeSubpath()
             tail.path = tailPath
         case .thought:
+            // `cloudPath` returns a SINGLE closed bezier outline — overlapping
+            // bumps share their intersection cusps, so the path traces only
+            // the outer silhouette. Stroke + fill cleanly with no internal
+            // arcs and no scene-coloured gaps between bumps.
+            cloudOutline.isHidden = true
+            background.strokeColor = Self.cloudOutlineColor
+            background.lineWidth = Self.cloudOutlineWidth
             background.path = Self.cloudPath(in: g.bubbleRect, bumpRadius: Self.cloudBumpRadius)
-            tail.path = Self.thoughtTailPath(towardX: g.tailApex.x,
-                                             fromY: g.bubbleRect.minY,
-                                             toY: g.tailApex.y)
+            // No tail for thought-style — the cloud silhouette + balloon
+            // position above the pet already convey the relationship.
+            tail.path = nil
         }
     }
 
-    /// Build a cloud-shaped path as a single closed bezier outline so only
-    /// the outer silhouette gets stroked. Bump centres lie on `rect`'s
-    /// perimeter; each bump arc sweeps ~252° outward, with adjacent arcs
-    /// joined by a short straight segment that dips inward to form the
-    /// concave dent between cloud puffs. Pure helper — unit-testable without
-    /// SpriteKit.
-    static func cloudPath(in rect: CGRect, bumpRadius r: CGFloat) -> CGPath {
+    /// Build a cloud-shaped path as a SINGLE closed bezier outline tracing
+    /// the outer silhouette of overlapping bumps along all four edges of
+    /// `rect`. Adjacent same-edge bumps share their upper-intersection
+    /// cusps so the path is continuous; bumps on different edges (across a
+    /// corner) are joined by an automatic chamfer line from `addArc`.
+    /// Pure helper — unit-testable without SpriteKit.
+    ///
+    /// `bumpRadius` controls puff size. `strideFactor` (default 1.6) sets
+    /// adjacent-centre spacing as a multiple of `bumpRadius`; values < 2
+    /// make the bumps overlap, which is what produces the concave dip
+    /// between puffs.
+    static func cloudPath(in rect: CGRect,
+                          bumpRadius r: CGFloat,
+                          strideFactor: CGFloat = 1.6) -> CGPath
+    {
         let path = CGMutablePath()
         guard r > 0, rect.width > r, rect.height > r else {
             path.addRect(rect)
             return path
         }
 
-        var bumps: [(centre: CGPoint, outward: CGFloat)] = []
+        // Top + bottom bumps live in the INTERIOR of the edge — their centres
+        // are inset by `r` from each end so the first/last bump's outermost
+        // tangent lands exactly on the rect's corner. Result: clean square
+        // corners with no diagonal puff bulging past them.
+        let topUsableWidth = rect.width - 2 * r
+        let topCount = max(2, Int(topUsableWidth / (r * strideFactor)) + 1)
+        let topStride = topUsableWidth / CGFloat(topCount - 1)
+        let topAlpha = bumpAlpha(stride: topStride, radius: r)
 
-        // Top edge — left to right (overall traversal is clockwise in y-up
-        // coords). Outward direction = +y = π/2.
-        let topCount = max(3, Int(round(rect.width / (r * 1.7))) + 1)
-        let topStride = rect.width / CGFloat(topCount - 1)
+        // Sides: same idea — bumps inset by `r` from the corners. A single
+        // side bump sits at midY; multiple bumps span from (maxY − r) to
+        // (minY + r). The edge has no bump at all when the rect is too
+        // short for one to fit between the corner insets.
+        let sideUsableHeight = rect.height - 2 * r
+        let sideCount = sideUsableHeight > 0
+            ? max(1, Int(sideUsableHeight / (r * strideFactor)) + 1)
+            : 0
+        let sideStride = sideCount > 1 ? sideUsableHeight / CGFloat(sideCount - 1) : 0
+        let sideAlpha = sideCount > 1 ? bumpAlpha(stride: sideStride, radius: r) : 0
+
+        // Top edge — left to right. outward = +y. First bump's left tangent
+        // is at (rect.minX, rect.maxY) = top-left corner; last bump's right
+        // tangent is at (rect.maxX, rect.maxY) = top-right corner.
         for i in 0..<topCount {
-            bumps.append((CGPoint(x: rect.minX + topStride * CGFloat(i),
-                                  y: rect.maxY), .pi / 2))
-        }
-
-        // Right edge — top to bottom. Outward = +x = 0. Skip when the bubble
-        // is short, otherwise the corner bumps already cover the full edge.
-        let sideCount = max(0, Int(round(rect.height / (r * 1.8))) - 1)
-        if sideCount > 0 {
-            let sideStride = rect.height / CGFloat(sideCount + 1)
-            for i in 1...sideCount {
-                bumps.append((CGPoint(x: rect.maxX,
-                                      y: rect.maxY - sideStride * CGFloat(i)), 0))
-            }
-        }
-
-        // Bottom edge — right to left. Outward = -y = -π/2.
-        for i in 0..<topCount {
-            bumps.append((CGPoint(x: rect.maxX - topStride * CGFloat(i),
-                                  y: rect.minY), -.pi / 2))
-        }
-
-        // Left edge — bottom to top. Outward = -x = π.
-        if sideCount > 0 {
-            let sideStride = rect.height / CGFloat(sideCount + 1)
-            for i in 1...sideCount {
-                bumps.append((CGPoint(x: rect.minX,
-                                      y: rect.minY + sideStride * CGFloat(i)), .pi))
-            }
-        }
-
-        // 0.7π half-span ⇒ each bump arc covers ~252°. With CW sweep the
-        // path passes outward through each bump centre's direction, then a
-        // short edge to the next bump produces the concave dip between puffs.
-        let halfSpan: CGFloat = .pi * 0.7
-
-        for (i, bump) in bumps.enumerated() {
-            let startAngle = bump.outward + halfSpan
-            let endAngle = bump.outward - halfSpan
+            let centre = CGPoint(x: rect.minX + r + topStride * CGFloat(i), y: rect.maxY)
+            let from: CGFloat = i == 0 ? .pi : .pi - topAlpha
+            let to: CGFloat = i == topCount - 1 ? 0 : topAlpha
             if i == 0 {
-                let entry = CGPoint(
-                    x: bump.centre.x + r * cos(startAngle),
-                    y: bump.centre.y + r * sin(startAngle))
-                path.move(to: entry)
+                path.move(to: CGPoint(x: centre.x + r * cos(from),
+                                      y: centre.y + r * sin(from)))
             }
-            path.addArc(center: bump.centre, radius: r,
-                        startAngle: startAngle, endAngle: endAngle,
-                        clockwise: true)
+            path.addArc(center: centre, radius: r,
+                        startAngle: from, endAngle: to, clockwise: true)
+        }
+
+        // Right edge — top to bottom. outward = 0. The corner from the
+        // last top bump's exit (top-right corner of rect) drops down to the
+        // first side bump's entry via an auto-line drawn by `addArc`.
+        if sideCount > 0 {
+            for i in 0..<sideCount {
+                let cy = sideCount == 1
+                    ? (rect.maxY + rect.minY) / 2
+                    : rect.maxY - r - sideStride * CGFloat(i)
+                let centre = CGPoint(x: rect.maxX, y: cy)
+                let from: CGFloat = i == 0 ? .pi / 2 : .pi / 2 - sideAlpha
+                let to: CGFloat = i == sideCount - 1 ? -.pi / 2 : -.pi / 2 + sideAlpha
+                path.addArc(center: centre, radius: r,
+                            startAngle: from, endAngle: to, clockwise: true)
+            }
+        } else {
+            // No side bumps — straight line down the right edge.
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        }
+
+        // Bottom edge — right to left. outward = −y.
+        for i in 0..<topCount {
+            let centre = CGPoint(x: rect.maxX - r - topStride * CGFloat(i), y: rect.minY)
+            let from: CGFloat = i == 0 ? 0 : -topAlpha
+            let to: CGFloat = i == topCount - 1 ? -.pi : -.pi + topAlpha
+            path.addArc(center: centre, radius: r,
+                        startAngle: from, endAngle: to, clockwise: true)
+        }
+
+        // Left edge — bottom to top. outward = π.
+        if sideCount > 0 {
+            for i in 0..<sideCount {
+                let cy = sideCount == 1
+                    ? (rect.maxY + rect.minY) / 2
+                    : rect.minY + r + sideStride * CGFloat(i)
+                let centre = CGPoint(x: rect.minX, y: cy)
+                let from: CGFloat = i == 0 ? -.pi / 2 : -.pi / 2 - sideAlpha
+                let to: CGFloat = i == sideCount - 1 ? .pi / 2 : .pi / 2 + sideAlpha
+                path.addArc(center: centre, radius: r,
+                            startAngle: from, endAngle: to, clockwise: true)
+            }
+        } else {
+            // No side bumps — close with a straight line up the left edge.
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         }
 
         path.closeSubpath()
         return path
+    }
+
+    /// Angle from a bump's centre to its intersection with the next
+    /// same-edge neighbour, where `stride` is the centre-to-centre
+    /// distance. Zero for tangent or non-overlapping bumps.
+    private static func bumpAlpha(stride: CGFloat, radius r: CGFloat) -> CGFloat {
+        guard stride < 2 * r else { return 0 }
+        let h = sqrt(r * r - (stride / 2) * (stride / 2))
+        return atan2(h, stride / 2)
     }
 
     /// Three trailing dots that shrink as they approach the pet — the
@@ -236,12 +304,12 @@ final class BalloonNode: SKNode {
         let path = CGMutablePath()
         let span = fromY - toY
         guard span > 0 else { return path }
-        // Position from bubble (t=0) → pet (t=1); shrink so the smallest dot
-        // is closest to the pet.
+        // Position from bubble (t=0) → pet (t=1); shrink so the smaller dot
+        // is closest to the pet. Two dots match the comic-book convention:
+        // a larger one near the cloud, a smaller one trailing toward the pet.
         let dots: [(t: CGFloat, radius: CGFloat)] = [
-            (0.15, 3.0),
-            (0.55, 2.0),
-            (0.95, 1.2),
+            (0.25, 2.6),
+            (0.85, 1.4),
         ]
         for dot in dots {
             let cy = fromY - span * dot.t
@@ -249,6 +317,20 @@ final class BalloonNode: SKNode {
                                        width: dot.radius * 2, height: dot.radius * 2))
         }
         return path
+    }
+
+    /// Resolve the system rounded font's PostScript name for `SKLabelNode`'s
+    /// `fontNamed:` initialiser. `NSFont.systemFont(...).withDesign(.rounded)`
+    /// returns the SF Pro Rounded variant on macOS 11+; we fall back to the
+    /// plain system font's name (and Helvetica beyond that) so we never crash
+    /// on a missing face.
+    static func roundedFontName(size: CGFloat, weight: NSFont.Weight) -> String {
+        let base = NSFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = base.fontDescriptor.withDesign(.rounded),
+           let rounded = NSFont(descriptor: descriptor, size: size) {
+            return rounded.fontName
+        }
+        return base.fontName.isEmpty ? "HelveticaNeue" : base.fontName
     }
 
     /// Truncate `s` to at most `max` characters, replacing the trailing

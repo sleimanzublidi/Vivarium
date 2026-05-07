@@ -1,5 +1,9 @@
 // LittleGuy/Models/ToolDisplayName.swift
 import Foundation
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "ToolDisplayName")
 
 /// Maps a raw tool name (as reported by the agent's `PreToolUse` /
 /// `preToolUse` hook) to a friendly gerund-style string shown in pet
@@ -21,7 +25,7 @@ enum ToolDisplayName {
         if let mapped = mapping[toolName.lowercased()] {
             return mapped
         }
-        NSLog("[INFO] No custom message for tool '\(toolName)'")
+        logger.info("No custom message for tool '\(toolName, privacy: .public)'")
         return toolName
     }
 

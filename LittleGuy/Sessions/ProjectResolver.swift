@@ -1,6 +1,10 @@
 // LittleGuy/Sessions/ProjectResolver.swift
 import Foundation
 import Darwin   // for fnmatch and FNM_PATHNAME
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "ProjectResolver")
 
 struct ProjectResolver {
     struct Override {
@@ -207,7 +211,7 @@ final class GlobalSettingsStore {
         if let selected = choosePetID(availablePetIDs), availablePetIDs.contains(selected) {
             return selected
         }
-        NSLog("[WARNING] Pet chooser returned no available pet; using \(availablePetIDs[0])")
+        logger.warning("Pet chooser returned no available pet; using \(availablePetIDs[0], privacy: .public)")
         return availablePetIDs[0]
     }
 
@@ -217,7 +221,7 @@ final class GlobalSettingsStore {
             let data = try Data(contentsOf: settingsURL)
             return try JSONDecoder().decode(Settings.self, from: data)
         } catch {
-            NSLog("[ERROR] Failed to read LittleGuy settings at \(settingsURL.path): \(error)")
+            logger.error("Failed to read LittleGuy settings at \(self.settingsURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
             return Settings()
         }
     }
@@ -231,7 +235,7 @@ final class GlobalSettingsStore {
             let data = try encoder.encode(settings)
             try data.write(to: settingsURL, options: [.atomic])
         } catch {
-            NSLog("[ERROR] Failed to write LittleGuy settings at \(settingsURL.path): \(error)")
+            logger.error("Failed to write LittleGuy settings at \(self.settingsURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
 }

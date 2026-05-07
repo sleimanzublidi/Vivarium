@@ -1,5 +1,9 @@
 // LittleGuy/Adapters/EventAdapter.swift
 import Foundation
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "EventNormalizer")
 
 /// One adapter per agent. Pure function: raw JSON → AgentEvent? (nil = unrecognized/malformed, drop).
 /// Adapters with internal mutable state (e.g. CopilotCLIAdapter) must guard it with a lock so
@@ -29,11 +33,12 @@ final class EventNormalizer: @unchecked Sendable {
         guard let env = try? JSONDecoder().decode(Envelope.self, from: line),
               let adapter = adapters[env.agent]
         else {
-            NSLog("[WARNING] unrecognized agent")
+            logger.warning("unrecognized agent")
             return nil
         }
 
-        NSLog("[VERBOSE] Received: \(String(data: line, encoding: .utf8)!.prefix(200))")
+        let received = String(data: line, encoding: .utf8) ?? "<binary>"
+        logger.debug("Received: \(String(received.prefix(200)), privacy: .public)")
 
         return adapter.adapt(rawJSON: line, receivedAt: receivedAt)
     }

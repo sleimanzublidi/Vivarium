@@ -66,3 +66,61 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LittleGuy.app/Contents/MacOS/LittleGuy"
+
+# Defining `schemes:` disables xcodegen's per-target auto-gen, so all
+# schemes we want must be listed here explicitly. The "Debug Grid" variant
+# launches the app with `LITTLEGUY_DEBUG_GRID=1` so the floating tank
+# renders every PetState in a grid for visual validation.
+schemes:
+  LittleGuy:
+    build:
+      targets:
+        LittleGuy: all
+        LittleGuyTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - LittleGuyTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  LittleGuy (Debug Grid):
+    build:
+      targets:
+        LittleGuy: all
+        LittleGuyTests: [test]
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: LITTLEGUY_DEBUG_GRID
+          value: "1"
+          isEnabled: true
+    test:
+      config: Debug
+      targets:
+        - LittleGuyTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  LittleGuyNotify:
+    build:
+      targets:
+        LittleGuyNotify: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

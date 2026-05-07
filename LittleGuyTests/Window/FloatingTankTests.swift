@@ -3,6 +3,16 @@ import XCTest
 @testable import LittleGuy
 
 final class FloatingTankTests: XCTestCase {
+    func test_debugGridUsesSeparateFrameDefaultsKey() {
+        XCTAssertNotEqual(FloatingTank.frameDefaultsKey,
+                          FloatingTank.debugGridFrameDefaultsKey)
+    }
+
+    func test_normalMinimumSizeMatchesNormalTankSize() {
+        XCTAssertEqual(FloatingTank.normalMinimumSize,
+                       NSSize(width: 320, height: 160))
+    }
+
     func test_clampedFrame_returnsDefaultWhenOffscreen() {
         let defaultRect = NSRect(x: 100, y: 100, width: 600, height: 220)
         let screens = [NSRect(x: 0, y: 0, width: 1920, height: 1080)]

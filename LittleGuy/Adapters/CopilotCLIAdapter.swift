@@ -1,6 +1,10 @@
 // LittleGuy/Adapters/CopilotCLIAdapter.swift
 import Foundation
 import CryptoKit
+import OSLog
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "CopilotCLIAdapter")
 
 /// Stateful: synthesizes a session key from the first `sessionStart` for a (cwd, ppid)
 /// pair and applies it to subsequent events. Per-instance state — one per process.
@@ -111,7 +115,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
     func adapt(rawJSON: Data, receivedAt: Date) -> AgentEvent? {
         guard let env = try? JSONDecoder().decode(Envelope.self, from: rawJSON),
               let cwdString = env.payload.cwd else {
-            NSLog("[WARNING] unrecognized copilot message")
+            logger.warning("unrecognized copilot message")
             return nil
         }
         let cwd = URL(fileURLWithPath: cwdString)

@@ -1,12 +1,19 @@
 // LittleGuy/Window/FloatingTank.swift
 import AppKit
 import IOKit.pwr_mgt
+import OSLog
 import SpriteKit
 
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "FloatingTank")
+
 final class FloatingTank: NSWindow {
-    private static let frameDefaultsKey = "LittleGuyFloatingTankFrame.v2"
+    static let frameDefaultsKey = "LittleGuyFloatingTankFrame.v2"
+    static let debugGridFrameDefaultsKey = "LittleGuyDebugGridFloatingTankFrame.v1"
+    static let normalMinimumSize = NSSize(width: 320, height: 160)
     private static let sleepAssertionReason = "LittleGuy floating tank visible" as CFString
     private let skView: PetDropSKView
+    private let frameDefaultsKey: String
     private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var sleepAssertionActive = false
     private var hasFinishedInitialRestore = false
@@ -23,13 +30,18 @@ final class FloatingTank: NSWindow {
         set { skView.onPetRightClicked = newValue }
     }
 
-    init(scene: SKScene, contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160)) {
+    init(scene: SKScene,
+         contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160),
+         frameDefaultsKey: String = FloatingTank.frameDefaultsKey,
+         minimumSize: NSSize = FloatingTank.normalMinimumSize)
+    {
         let view = PetDropSKView(frame: NSRect(origin: .zero, size: contentRect.size))
         view.preferredFramesPerSecond = 60
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
         view.presentScene(scene)
         self.skView = view
+        self.frameDefaultsKey = frameDefaultsKey
 
         super.init(contentRect: contentRect,
                    styleMask: [.borderless, .resizable],
@@ -44,6 +56,7 @@ final class FloatingTank: NSWindow {
         self.isMovableByWindowBackground = true
         self.acceptsMouseMovedEvents = true
         self.isReleasedWhenClosed = false
+        self.minSize = minimumSize
 
         // Restore the frame anchored to the display it was on, so the window
         // returns to the same monitor across launches. NSWindow's built-in
@@ -52,7 +65,7 @@ final class FloatingTank: NSWindow {
         // routinely on multi-monitor setups when the Dock/Mission Control
         // shifts a visibleFrame even slightly.
         let restored = Self.resolveRestoredFrame(
-            saved: Self.loadPersistedFrame(),
+            saved: Self.loadPersistedFrame(forKey: frameDefaultsKey),
             currentScreens: NSScreen.screens.map(ScreenInfo.init(screen:)),
             defaultRect: contentRect)
         self.setFrame(restored, display: false)
@@ -116,7 +129,7 @@ final class FloatingTank: NSWindow {
             sleepAssertionID = newID
             sleepAssertionActive = true
         } else {
-            NSLog("[ERROR] IOPMAssertionCreateWithName failed: \(result)")
+            logger.error("IOPMAssertionCreateWithName failed: \(result, privacy: .public)")
         }
     }
 
@@ -137,11 +150,11 @@ final class FloatingTank: NSWindow {
                                          screenFrame: screen.frame,
                                          displayID: displayID)
         if let data = try? JSONEncoder().encode(payload) {
-            UserDefaults.standard.set(data, forKey: Self.frameDefaultsKey)
+            UserDefaults.standard.set(data, forKey: frameDefaultsKey)
         }
     }
 
-    private static func loadPersistedFrame() -> PersistedTankFrame? {
+    private static func loadPersistedFrame(forKey frameDefaultsKey: String) -> PersistedTankFrame? {
         guard let data = UserDefaults.standard.data(forKey: frameDefaultsKey) else { return nil }
         return try? JSONDecoder().decode(PersistedTankFrame.self, from: data)
     }

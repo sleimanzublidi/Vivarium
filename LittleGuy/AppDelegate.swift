@@ -1,6 +1,10 @@
 // LittleGuy/AppDelegate.swift
 import AppKit
+import OSLog
 import SpriteKit
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.littleguy.LittleGuy",
+                            category: "AppDelegate")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var server: SocketServer!
@@ -10,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var library: PetLibrary!
     private var settingsStore: GlobalSettingsStore!
     private var statusItem: NSStatusItem!
+    private var debugGridScene: DebugGridScene?
+    private var debugGridPacks: [PetPack] = []
     private let petRegistry = InstalledPetRegistry()
     private let normalizer = EventNormalizer(adapters: [
         ClaudeCodeAdapter(),
@@ -34,9 +40,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let outcome = library.discoverAll(userPetsDir: userPetsDir)
         let packs = Dictionary(uniqueKeysWithValues: outcome.packs.map { ($0.manifest.id, $0) })
 
+        if Self.debugGridEnabled {
+            installDebugGrid(packs: outcome.packs)
+            installMenuBarItem()
+            return
+        }
+
         let petIds = outcome.packs.map(\.manifest.id)
         let defaultID = outcome.packs.randomElement()?.manifest.id ?? "sample-pet"
         petRegistry.reset(availablePetIDs: petIds, defaultPetID: defaultID)
+
+        logger.info("App launched. \(outcome.packs.count) pets found. default: \(defaultID)")
 
         settingsStore = GlobalSettingsStore(settingsURL: settingsURL)
         let resolver = ProjectResolver(
@@ -44,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaultPetIDProvider: { [petRegistry] in petRegistry.defaultPetID },
             availablePetIDsProvider: { [petRegistry] in petRegistry.availablePetIDs },
             settingsStore: settingsStore)
-        store = SessionStore(resolver: resolver, idleTimeout: 600)
+        store = SessionStore(resolver: resolver)
 
         director = SceneDirector(library: library,
                                   packsByID: packs,
@@ -69,15 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             server = try SocketServer(socketURL: socketURL) { [store] line in
                 let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
                 if let event = normalizer.normalize(line: line) {
-                    NSLog("[VERBOSE] sock OK agent=\(event.agent.rawValue) kind=\(event.kind) sessionKey=\(event.sessionKey) cwd=\(event.cwd.path)")
+                    logger.debug("sock OK agent=\(event.agent.rawValue, privacy: .public) kind=\(String(describing: event.kind), privacy: .public) sessionKey=\(event.sessionKey, privacy: .public) cwd=\(event.cwd.path, privacy: .public)")
                     await store.apply(event)
                 } else {
-                    NSLog("[WARNING] sock DROPPED (\(line.count)B) — \(preview)")
+                    logger.warning("sock DROPPED (\(line.count, privacy: .public)B) — \(preview, privacy: .public)")
                 }
             }
             try server.start()
         } catch {
-            NSLog("[ERROR] socket startup failed: \(error)")
+            logger.error("socket startup failed: \(String(describing: error), privacy: .public)")
         }
 
         tank = FloatingTank(scene: director.scene)
@@ -191,6 +205,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     agent: selection.agent) }
     }
 
+    // MARK: - Debug grid mode
+
+    /// `LITTLEGUY_DEBUG_GRID=1` swaps the normal session/socket pipeline for
+    /// a static 3×3 grid of all `PetState` animations. Used to validate
+    /// sprite + balloon rendering without driving real agent events.
+    private static var debugGridEnabled: Bool {
+        ProcessInfo.processInfo.environment["LITTLEGUY_DEBUG_GRID"] == "1"
+    }
+
+    private func installDebugGrid(packs: [PetPack]) {
+        guard let initial = packs.randomElement() else {
+            logger.error("LITTLEGUY_DEBUG_GRID=1 but no pets are installed; nothing to render")
+            return
+        }
+        debugGridPacks = packs
+        let scene = DebugGridScene(library: library, pack: initial)
+        debugGridScene = scene
+
+        let contentRect = NSRect(x: 200, y: 200,
+                                 width: scene.size.width,
+                                 height: scene.size.height)
+        tank = FloatingTank(scene: scene,
+                            contentRect: contentRect,
+                            frameDefaultsKey: FloatingTank.debugGridFrameDefaultsKey,
+                            minimumSize: scene.size)
+        tank.onPetRightClicked = { [weak self] _, screenPoint in
+            self?.showDebugGridPetPicker(at: screenPoint)
+        }
+        tank.makeKeyAndOrderFront(nil)
+        logger.info("DebugGrid: rendering pet '\(initial.manifest.id, privacy: .public)' across \(DebugGridScene.states.count, privacy: .public) states")
+    }
+
+    private func showDebugGridPetPicker(at screenPoint: NSPoint) {
+        guard let scene = debugGridScene, !debugGridPacks.isEmpty else { return }
+        let menu = NSMenu(title: "Debug Pet")
+        menu.autoenablesItems = false
+        let sorted = debugGridPacks.sorted {
+            $0.manifest.displayName.localizedCaseInsensitiveCompare($1.manifest.displayName) == .orderedAscending
+        }
+        for pack in sorted {
+            let item = NSMenuItem(title: pack.manifest.displayName,
+                                  action: #selector(debugGridPetSelected(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = pack.manifest.id
+            if pack.manifest.id == scene.pack.manifest.id {
+                item.state = .on
+            }
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: screenPoint, in: nil)
+    }
+
+    @objc private func debugGridPetSelected(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let pack = debugGridPacks.first(where: { $0.manifest.id == id })
+        else { return }
+        debugGridScene?.setPack(pack)
+    }
+
     // MARK: - Pet installation
 
     private func installDroppedPetZips(_ zipURLs: [URL]) {
@@ -210,9 +284,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             petRegistry.register(petID: pack.manifest.id)
             director.register(pack: pack)
             director.previewInstalledPet(pack)
-            NSLog("[INFO] installed pet \(pack.manifest.id) from \(zipURL.path)")
+            logger.info("installed pet \(pack.manifest.id, privacy: .public) from \(zipURL.path, privacy: .public)")
         } catch {
-            NSLog("[ERROR] failed to install pet from \(zipURL.path): \(error)")
+            logger.error("failed to install pet from \(zipURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
             presentInstallFailure(zipURL: zipURL, error: error)
         }
     }

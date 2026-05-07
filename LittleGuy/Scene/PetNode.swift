@@ -28,6 +28,10 @@ final class PetNode: SKSpriteNode {
         play(state: state, force: false)
     }
 
+    func replay(state: PetState) {
+        play(state: state, force: true)
+    }
+
     /// Replace the underlying spritesheet for this pet, snapping the visible
     /// texture to the new pack's first frame so callers never see a flicker
     /// of the old pet between `swapPack` and the next `play(...)` call.
