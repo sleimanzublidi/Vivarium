@@ -151,6 +151,21 @@ final class GlobalSettingsStore {
         return selected
     }
 
+    /// Persist `petID` as the choice for `projectURL` + `agent`. No-op when
+    /// `petID` is in `nonPersistablePetIDs` (e.g. the bundled `sample-pet`),
+    /// since those slots are intentionally never written to settings.
+    func setPetID(_ petID: String, forProject projectURL: URL, agent: AgentType) {
+        guard Self.isPersistablePetID(petID) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var settings = loadSettings()
+        _ = removeNonPersistablePetAssignments(from: &settings)
+        let key = Self.projectAgentKey(for: projectURL, agent: agent)
+        guard settings.projectPets[key] != petID else { return }
+        settings.projectPets[key] = petID
+        saveSettings(settings)
+    }
+
     static func projectKey(for url: URL) -> String {
         url.standardizedFileURL.path
     }

@@ -54,6 +54,7 @@ final class CopilotCLIAdapterTests: XCTestCase {
         _ = try adapt("session-start")
         let e = try XCTUnwrap(try adapt("pre-tool-use"))
         XCTAssertEqual(e.kind, .toolStart(name: "bash"))
+        XCTAssertEqual(e.detail, "go test ./...")
     }
 
     func test_postToolUseSuccess() throws {
@@ -114,6 +115,7 @@ final class CopilotCLIAdapterTests: XCTestCase {
         let e = try XCTUnwrap(try adapt("pre-tool-use-real"))
         XCTAssertEqual(e.kind, .toolStart(name: "view"))
         XCTAssertEqual(e.sessionKey, "c808dc63-ff21-4fea-ab88-e400498fbd3e")
+        XCTAssertNil(e.detail)
     }
 
     func test_realCopilot_postToolUse_acceptsObjectToolArgs() throws {

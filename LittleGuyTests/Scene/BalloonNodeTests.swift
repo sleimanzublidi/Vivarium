@@ -41,6 +41,32 @@ final class BalloonNodeTests: XCTestCase {
         balloon.dismiss()
         XCTAssertTrue(balloon.isHidden)
     }
+
+    func test_cloudPath_coversInputRect() {
+        // The cloud body's bounding box must cover the requested rect so
+        // text laid out at the same coordinates stays inside the puffy
+        // outline — bumps protrude *outward* from the centre rect.
+        let rect = CGRect(x: -100, y: 12, width: 200, height: 28)
+        let path = BalloonNode.cloudPath(in: rect, bumpRadius: 5)
+        let bbox = path.boundingBoxOfPath
+        XCTAssertLessThanOrEqual(bbox.minX, rect.minX + 0.5)
+        XCTAssertLessThanOrEqual(bbox.minY, rect.minY + 0.5)
+        XCTAssertGreaterThanOrEqual(bbox.maxX, rect.maxX - 0.5)
+        XCTAssertGreaterThanOrEqual(bbox.maxY, rect.maxY - 0.5)
+    }
+
+    func test_thoughtTailPath_isEmptyWhenNoSpan() {
+        let path = BalloonNode.thoughtTailPath(towardX: 0, fromY: 10, toY: 10)
+        XCTAssertTrue(path.isEmpty)
+    }
+
+    func test_thoughtTailPath_dotsLieBetweenBubbleAndPet() {
+        let path = BalloonNode.thoughtTailPath(towardX: 0, fromY: 20, toY: 0)
+        XCTAssertFalse(path.isEmpty)
+        let bbox = path.boundingBoxOfPath
+        XCTAssertGreaterThanOrEqual(bbox.minY, -2)   // smallest dot near pet
+        XCTAssertLessThanOrEqual(bbox.maxY, 22)      // largest dot near bubble
+    }
 }
 
 final class BalloonGeometryTests: XCTestCase {
@@ -296,10 +322,10 @@ final class SceneDirectorBalloonTests: XCTestCase {
         XCTAssertTrue(pet.balloon.isHidden)
     }
 
-    /// Once the session leaves the attention state, the balloon clears so
-    /// stale "needs your attention" text doesn't linger after the user has
-    /// acted (e.g. they typed a reply, transitioning waiting → review).
-    func test_stateExitingAttention_dismissesBalloon() {
+    /// When the session leaves an attention state for a non-sticky state
+    /// (e.g. waiting → idle on session end), the balloon clears so stale
+    /// "needs your attention" text doesn't linger.
+    func test_stateExitingAttentionToIdle_dismissesBalloon() {
         let director = makeDirector()
         let t0 = Date()
         director.addOrUpdate(session: makeSession(
@@ -309,13 +335,12 @@ final class SceneDirectorBalloonTests: XCTestCase {
         let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
         XCTAssertFalse(pet.balloon.isHidden)
 
-        // Simulate the user replying — pet enters review (or running).
         director.addOrUpdate(session: makeSession(
-            state: .review,
+            state: .idle,
             lastEventAt: t0.addingTimeInterval(1),
             balloon: BalloonText(text: "are you there?", postedAt: t0)))
         XCTAssertTrue(pet.balloon.isHidden,
-                      "leaving an attention state should clear its balloon")
+                      "leaving an attention state for a non-sticky state should clear its balloon")
     }
 }
 

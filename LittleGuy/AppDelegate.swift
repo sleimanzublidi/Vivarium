@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var director: SceneDirector!
     private var tank: FloatingTank!
     private var library: PetLibrary!
+    private var settingsStore: GlobalSettingsStore!
     private var statusItem: NSStatusItem!
     private let petRegistry = InstalledPetRegistry()
     private let normalizer = EventNormalizer(adapters: [
@@ -37,11 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let defaultID = outcome.packs.randomElement()?.manifest.id ?? "sample-pet"
         petRegistry.reset(availablePetIDs: petIds, defaultPetID: defaultID)
 
+        settingsStore = GlobalSettingsStore(settingsURL: settingsURL)
         let resolver = ProjectResolver(
             overrides: [],
             defaultPetIDProvider: { [petRegistry] in petRegistry.defaultPetID },
             availablePetIDsProvider: { [petRegistry] in petRegistry.availablePetIDs },
-            settingsStore: GlobalSettingsStore(settingsURL: settingsURL))
+            settingsStore: settingsStore)
         store = SessionStore(resolver: resolver, idleTimeout: 600)
 
         director = SceneDirector(library: library,
@@ -82,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tank.onPetZipDropped = { [weak self] urls in
             self?.installDroppedPetZips(urls)
         }
+        tank.onPetRightClicked = { [weak self] sessionKey, screenPoint in
+            self?.showPetSelectionMenu(forSessionKey: sessionKey, at: screenPoint)
+        }
         tank.makeKeyAndOrderFront(nil)
 
         installMenuBarItem()
@@ -100,8 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installMenuBarItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "pawprint.fill",
-                                   accessibilityDescription: "LittleGuy")
+            button.image = Self.menuBarIcon()
             button.image?.isTemplate = true
         }
         let menu = NSMenu()
@@ -129,6 +133,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    /// Build the menu bar icon: load `Icon.pdf` from the bundle and resize it
+    /// to AppKit's standard status-item height (18pt). The image is marked as
+    /// a template so the OS tints it for light/dark menu bars. Falls back to
+    /// the SF Symbol if the bundled asset is missing for any reason.
+    private static func menuBarIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        if let url = Bundle.main.url(forResource: "Icon", withExtension: "pdf"),
+           let image = NSImage(contentsOf: url)
+        {
+            image.size = size
+            image.accessibilityDescription = "LittleGuy"
+            return image
+        }
+        return NSImage(systemSymbolName: "pawprint.fill",
+                       accessibilityDescription: "LittleGuy") ?? NSImage()
+    }
+
+    // MARK: - Pet selection menu
+
+    /// Build the right-click pet picker for the visible pet at `sessionKey`
+    /// and pop it up at `screenPoint`. The current pet is checkmarked; picking
+    /// any other entry persists the choice and triggers a swap+greet animation.
+    private func showPetSelectionMenu(forSessionKey sessionKey: String, at screenPoint: NSPoint) {
+        guard let session = director.session(forSessionKey: sessionKey) else { return }
+        let pets = director.availablePets()
+        guard !pets.isEmpty else { return }
+
+        let menu = NSMenu(title: "Choose Pet")
+        menu.autoenablesItems = false
+        for pet in pets {
+            let item = NSMenuItem(title: pet.displayName,
+                                  action: #selector(petMenuItemSelected(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = PetMenuSelection(petID: pet.id,
+                                                      projectURL: session.project.url,
+                                                      agent: session.agent)
+            if pet.id == session.project.petId {
+                item.state = .on
+            }
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: screenPoint, in: nil)
+    }
+
+    @objc private func petMenuItemSelected(_ sender: NSMenuItem) {
+        guard let selection = sender.representedObject as? PetMenuSelection else { return }
+        settingsStore.setPetID(selection.petID,
+                               forProject: selection.projectURL,
+                               agent: selection.agent)
+        let store = self.store!
+        Task { await store.setPetID(selection.petID,
+                                    forProject: selection.projectURL,
+                                    agent: selection.agent) }
     }
 
     // MARK: - Pet installation
@@ -165,6 +225,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
+}
+
+private struct PetMenuSelection {
+    let petID: String
+    let projectURL: URL
+    let agent: AgentType
 }
 
 private final class InstalledPetRegistry {

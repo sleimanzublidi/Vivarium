@@ -306,6 +306,59 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertEqual(chooseCount, 1)
     }
 
+    func test_setPetID_persistsExplicitChoice() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "a" }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: ["a", "b"],
+                                       settingsStore: store)
+        // Seed an initial mapping by resolving once.
+        XCTAssertEqual(resolver.resolve(cwd: project, agent: .claudeCode).petId, "a")
+
+        store.setPetID("b", forProject: project, agent: .claudeCode)
+
+        let saved = try JSONDecoder().decode(GlobalSettingsStore.Settings.self,
+                                             from: Data(contentsOf: settingsURL))
+        XCTAssertEqual(saved.projectPets[GlobalSettingsStore.projectAgentKey(for: project, agent: .claudeCode)], "b")
+
+        // A fresh resolver reading from the same file must return the new pet.
+        let secondResolver = ProjectResolver(overrides: [],
+                                             defaultPetID: "sample-pet",
+                                             availablePetIDs: ["a", "b"],
+                                             settingsStore: GlobalSettingsStore(settingsURL: settingsURL) { _ in "a" })
+        XCTAssertEqual(secondResolver.resolve(cwd: project, agent: .claudeCode).petId, "b")
+    }
+
+    func test_setPetID_ignoresNonPersistableSamplePet() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let key = GlobalSettingsStore.projectAgentKey(for: project, agent: .claudeCode)
+        let existing = GlobalSettingsStore.Settings(projectPets: [key: "real-pet"])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "real-pet" }
+        store.setPetID("sample-pet", forProject: project, agent: .claudeCode)
+
+        let saved = try JSONDecoder().decode(GlobalSettingsStore.Settings.self,
+                                             from: Data(contentsOf: settingsURL))
+        XCTAssertEqual(saved.projectPets[key], "real-pet",
+                       "sample-pet must never be written as a per-project mapping")
+    }
+
     func test_gitRootIsUsedAsProjectPetMappingKey() {
         let settingsDir = makeTempDir()
         let settingsURL = settingsDir.appendingPathComponent("settings.json")

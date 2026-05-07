@@ -61,11 +61,14 @@ final class SessionStoreTests: XCTestCase {
 
     // MARK: - Idle-timeout fallback
 
-    private func makeStoreWithIdleFallback(_ timeout: TimeInterval) -> SessionStore {
+    private func makeStoreWithIdleFallback(_ timeout: TimeInterval,
+                                           completionAnimationDuration: TimeInterval = 0.05) -> SessionStore
+    {
         let clockRef = clock!
         return SessionStore(resolver: resolver,
                             idleTimeout: 600,
                             agentIdleTimeout: timeout,
+                            completionAnimationDuration: completionAnimationDuration,
                             now: { clockRef.now })
     }
 
@@ -85,6 +88,23 @@ final class SessionStoreTests: XCTestCase {
         let afterState = await store.snapshot().first?.state
         XCTAssertEqual(afterState, .idle,
                        "should auto-idle once agentIdleTimeout passes with no events")
+    }
+
+    func test_idleTimeout_playsCompletionAnimationBeforeIdle() async throws {
+        let store = makeStoreWithIdleFallback(0.1, completionAnimationDuration: 0.4)
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: nil, at: clock.now))
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+        var state = await store.snapshot().first?.state
+        XCTAssertEqual(state, .jumping,
+                       "successful completion should briefly play the Codex jumping row")
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+        state = await store.snapshot().first?.state
+        XCTAssertEqual(state, .idle)
     }
 
     /// Attention states (`.waiting`, `.failed`) must never auto-idle —
@@ -134,10 +154,16 @@ final class SessionStoreTests: XCTestCase {
                        "fresh event should have reset the timer")
     }
 
-    func test_turnEnd_setsIdle_withoutRemovingSession() async {
+    func test_turnEnd_playsCompletionThenIdle_withoutRemovingSession() async throws {
+        let clockRef = clock!
+        let store = SessionStore(resolver: resolver,
+                                 idleTimeout: 600,
+                                 completionAnimationDuration: 0.1,
+                                 now: { clockRef.now })
+
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
-                                 cwd: URL(fileURLWithPath: "/tmp"),
-                                 kind: .sessionStart, detail: nil, at: clock.now))
+                                  cwd: URL(fileURLWithPath: "/tmp"),
+                                  kind: .sessionStart, detail: nil, at: clock.now))
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
                                  kind: .toolStart(name: "Bash"), detail: nil, at: clock.now))
@@ -146,11 +172,41 @@ final class SessionStoreTests: XCTestCase {
                                  kind: .toolEnd(name: "Bash", success: true),
                                  detail: nil, at: clock.now))
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                  cwd: URL(fileURLWithPath: "/tmp"),
+                                  kind: .turnEnd, detail: nil, at: clock.now))
+        var snap = await store.snapshot()
+        XCTAssertEqual(snap.count, 1, "turnEnd must NOT remove the session")
+        XCTAssertEqual(snap.first?.state, .jumping)
+
+        try await Task.sleep(nanoseconds: 250_000_000)
+        snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .idle)
+    }
+
+    func test_toolStart_interruptsCompletionAnimation() async throws {
+        let clockRef = clock!
+        let store = SessionStore(resolver: resolver,
+                                 idleTimeout: 600,
+                                 completionAnimationDuration: 0.2,
+                                 now: { clockRef.now })
+
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
                                  kind: .turnEnd, detail: nil, at: clock.now))
-        let snap = await store.snapshot()
-        XCTAssertEqual(snap.count, 1, "turnEnd must NOT remove the session")
-        XCTAssertEqual(snap.first?.state, .idle)
+        var state = await store.snapshot().first?.state
+        XCTAssertEqual(state, .jumping)
+
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Read"),
+                                 detail: nil, at: clock.now))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        state = await store.snapshot().first?.state
+        XCTAssertEqual(state, .running)
     }
 
     func test_toolStart_setsBalloonToFriendlyToolName() async {
@@ -168,7 +224,18 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snap.first?.lastBalloon?.postedAt, clock.now)
     }
 
-    func test_promptSubmit_setsReview() async {
+    func test_toolStart_withShellCommand_setsBalloonToExecutable() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: "git status --short", at: clock.now))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .running)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "git")
+    }
+
+    func test_promptSubmit_setsReviewAndThinkingBalloon() async {
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
                                  kind: .sessionStart, detail: nil, at: clock.now))
@@ -177,6 +244,7 @@ final class SessionStoreTests: XCTestCase {
                                  kind: .promptSubmit(text: "hi"), detail: nil, at: clock.now))
         let snap = await store.snapshot()
         XCTAssertEqual(snap.first?.state, .review)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Thinking...")
     }
 
     func test_waitingForInput_setsWaiting() async {
@@ -210,6 +278,57 @@ final class SessionStoreTests: XCTestCase {
                                  kind: .sessionEnd(reason: nil), detail: nil, at: clock.now))
         let snap = await store.snapshot()
         XCTAssertEqual(snap.count, 0)
+    }
+
+    func test_setPetID_updatesProjectAndEmitsChanged() async {
+        let cwd = URL(fileURLWithPath: "/tmp/proj")
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: cwd, kind: .sessionStart, detail: nil, at: clock.now))
+        let original = await store.snapshot().first?.project.petId
+        XCTAssertEqual(original, "sample-pet",
+                       "test resolver returns sample-pet before any explicit override")
+
+        var observed: [SessionStoreEvent] = []
+        let stream = await store.events()
+        let observer = Task {
+            for await event in stream {
+                observed.append(event)
+                if observed.count == 1 { break }
+            }
+        }
+
+        await store.setPetID("wizard", forProject: cwd, agent: .claudeCode)
+        _ = await observer.value
+
+        let updated = await store.snapshot().first?.project.petId
+        XCTAssertEqual(updated, "wizard")
+        if case .changed(let s) = observed.first {
+            XCTAssertEqual(s.project.petId, "wizard")
+            XCTAssertEqual(s.sessionKey, "k1")
+        } else {
+            XCTFail("expected .changed event with new petId")
+        }
+    }
+
+    func test_setPetID_skipsSessionsForOtherProjectsOrAgents() async {
+        let projA = URL(fileURLWithPath: "/tmp/A")
+        let projB = URL(fileURLWithPath: "/tmp/B")
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-A",
+                                 cwd: projA, kind: .sessionStart, detail: nil, at: clock.now))
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k-B",
+                                 cwd: projB, kind: .sessionStart, detail: nil, at: clock.now))
+        await store.apply(.init(agent: .copilotCli, sessionKey: "k-A-cop",
+                                 cwd: projA, kind: .sessionStart, detail: nil, at: clock.now))
+
+        await store.setPetID("wizard", forProject: projA, agent: .claudeCode)
+
+        let snap = await store.snapshot()
+        let byKey = Dictionary(uniqueKeysWithValues: snap.map { ($0.sessionKey, $0) })
+        XCTAssertEqual(byKey["k-A"]?.project.petId, "wizard")
+        XCTAssertNotEqual(byKey["k-B"]?.project.petId, "wizard",
+                          "different project must not be touched")
+        XCTAssertNotEqual(byKey["k-A-cop"]?.project.petId, "wizard",
+                          "same project but different agent must not be touched")
     }
 
     func test_evictionRemovesIdleSessions() async {

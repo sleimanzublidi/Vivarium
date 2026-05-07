@@ -30,6 +30,7 @@ final class ClaudeCodeAdapterTests: XCTestCase {
     func test_preToolUseBash_isToolStart() throws {
         let e = try XCTUnwrap(try adapt("pre-tool-use-bash"))
         XCTAssertEqual(e.kind, .toolStart(name: "Bash"))
+        XCTAssertEqual(e.detail, "ls")
     }
 
     func test_postToolUseBash_isToolEndSuccess() throws {

@@ -13,10 +13,15 @@ struct ClaudeCodeAdapter: EventAdapter {
         let session_id: String?
         let cwd: String?
         let tool_name: String?
+        let tool_input: ToolInput?
         let message: String?
         let prompt: String?
         let reason: String?
         let tool_response: ToolResponse?
+    }
+
+    private struct ToolInput: Decodable {
+        let command: String?
     }
 
     private struct ToolResponse: Decodable {
@@ -32,23 +37,44 @@ struct ClaudeCodeAdapter: EventAdapter {
         }
         let cwd = URL(fileURLWithPath: cwdString)
         let kind: AgentEventKind?
+        let detail: String?
         switch env.event {
-        case "SessionStart":      kind = .sessionStart
-        case "SessionEnd":        kind = .sessionEnd(reason: env.payload.reason)
-        case "Stop":              kind = .turnEnd
+        case "SessionStart":
+            kind = .sessionStart
+            detail = nil
+        case "SessionEnd":
+            kind = .sessionEnd(reason: env.payload.reason)
+            detail = nil
+        case "Stop":
+            kind = .turnEnd
+            detail = nil
         case "PreToolUse":
             guard let n = env.payload.tool_name else { return nil }
             kind = .toolStart(name: n)
+            detail = env.payload.tool_input?.command
         case "PostToolUse":
             guard let n = env.payload.tool_name else { return nil }
             let ok = !(env.payload.tool_response?.is_error ?? false)
             kind = .toolEnd(name: n, success: ok)
-        case "Notification":      kind = .waitingForInput(message: env.payload.message)
-        case "PreCompact":        kind = .compacting
-        case "SubagentStart":     kind = .subagentStart
-        case "SubagentStop":      kind = .subagentEnd
-        case "UserPromptSubmit":  kind = .promptSubmit(text: env.payload.prompt)
-        default:                  kind = nil
+            detail = nil
+        case "Notification":
+            kind = .waitingForInput(message: env.payload.message)
+            detail = env.payload.message
+        case "PreCompact":
+            kind = .compacting
+            detail = nil
+        case "SubagentStart":
+            kind = .subagentStart
+            detail = nil
+        case "SubagentStop":
+            kind = .subagentEnd
+            detail = nil
+        case "UserPromptSubmit":
+            kind = .promptSubmit(text: env.payload.prompt)
+            detail = env.payload.prompt
+        default:
+            kind = nil
+            detail = nil
         }
         guard let k = kind else { return nil }
         return AgentEvent(
@@ -56,7 +82,7 @@ struct ClaudeCodeAdapter: EventAdapter {
             sessionKey: sessionID,
             cwd: cwd,
             kind: k,
-            detail: env.payload.message ?? env.payload.prompt,
+            detail: detail,
             at: receivedAt
         )
     }

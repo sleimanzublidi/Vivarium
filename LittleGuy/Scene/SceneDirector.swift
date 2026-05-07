@@ -72,7 +72,17 @@ final class SceneDirector {
         sessions[session.sessionKey] = session
         reconcileVisibility()
         if let node = nodes[session.sessionKey] {
-            node.play(state: session.state)
+            // When the user picks a different pet for this project, the
+            // session's petId changes but the slot stays. Swap the pack in
+            // place and replay the spawn greeting so the new pet waves hello
+            // before settling into the current state.
+            if node.pack.manifest.id != session.project.petId,
+               let pack = packsByID[session.project.petId] {
+                node.swapPack(pack)
+                node.playSpawnGreeting(then: session.state)
+            } else {
+                node.play(state: session.state)
+            }
             updateBalloon(session: session, on: node)
         }
     }
@@ -94,6 +104,21 @@ final class SceneDirector {
 
     func register(pack: PetPack) {
         packsByID[pack.manifest.id] = pack
+    }
+
+    /// Pets currently registered with the director, sorted by display name.
+    /// Used by AppDelegate to populate the right-click pet picker.
+    func availablePets() -> [(id: String, displayName: String)] {
+        packsByID.values
+            .map { (id: $0.manifest.id, displayName: $0.manifest.displayName) }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Session attached to a visible pet, if any. AppDelegate uses this to
+    /// look up project + agent for the right-clicked pet without round-tripping
+    /// through the SessionStore actor.
+    func session(forSessionKey sessionKey: String) -> Session? {
+        sessions[sessionKey]
     }
 
     func previewInstalledPet(_ pack: PetPack, duration: TimeInterval = 5) {
@@ -248,12 +273,13 @@ final class SceneDirector {
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,
                              ttl: balloonTTL,
-                             sticky: true)
+                             sticky: true,
+                             style: session.state == .review ? .thought : .speech)
     }
 
     static func showsStickyBalloon(for state: PetState) -> Bool {
         switch state {
-        case .waiting, .failed, .running: return true
+        case .waiting, .failed, .running, .review: return true
         default: return false
         }
     }

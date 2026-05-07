@@ -14,6 +14,14 @@ final class FloatingTank: NSWindow {
         get { skView.onPetZipDropped }
         set { skView.onPetZipDropped = newValue }
     }
+    /// Fired when the user right-clicks a pet. The first argument is the
+    /// pet's `sessionKey`; the second is the cursor location in *screen*
+    /// coordinates (suitable for `NSMenu.popUp(positioning:at:in:)` with
+    /// `in: nil`).
+    var onPetRightClicked: ((String, NSPoint) -> Void)? {
+        get { skView.onPetRightClicked }
+        set { skView.onPetRightClicked = newValue }
+    }
 
     init(scene: SKScene, contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160)) {
         let view = PetDropSKView(frame: NSRect(origin: .zero, size: contentRect.size))
@@ -248,6 +256,7 @@ private extension NSScreen {
 
 final class PetDropSKView: SKView {
     var onPetZipDropped: (([URL]) -> Void)?
+    var onPetRightClicked: ((String, NSPoint) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -257,6 +266,39 @@ final class PetDropSKView: SKView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         registerForDraggedTypes([.fileURL])
+    }
+
+    /// Suppress AppKit's default contextual-menu pathway so we can build the
+    /// pet picker ourselves on `rightMouseDown`.
+    override func menu(for event: NSEvent) -> NSMenu? { nil }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let scene = scene, let onPetRightClicked = onPetRightClicked else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let scenePoint = convert(viewPoint, to: scene)
+        guard let pet = petNode(at: scenePoint, in: scene) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        let screenRect = window?.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero))
+        let screenPoint = screenRect?.origin ?? NSEvent.mouseLocation
+        onPetRightClicked(pet.sessionKey, screenPoint)
+    }
+
+    /// Walk the SKNode hierarchy under `point` looking for a PetNode. Picks
+    /// the topmost one (`SKScene.nodes(at:)` already returns front-to-back).
+    private func petNode(at point: CGPoint, in scene: SKScene) -> PetNode? {
+        for node in scene.nodes(at: point) {
+            var current: SKNode? = node
+            while let n = current {
+                if let pet = n as? PetNode { return pet }
+                current = n.parent
+            }
+        }
+        return nil
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

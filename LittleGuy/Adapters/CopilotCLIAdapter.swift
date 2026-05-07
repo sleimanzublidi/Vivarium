@@ -22,6 +22,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         let cwd: String?
         let prompt: String?
         let toolName: String?
+        let toolArgsCommand: String?
         // Note: Copilot CLI emits `toolArgs` as a JSON object whose shape is
         // tool-specific. We don't currently use it — listing it here as a
         // String would make `init(from:)` throw a typeMismatch and kill
@@ -33,7 +34,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
 
         private enum CodingKeys: String, CodingKey {
             case timestamp, sessionId, cwd, prompt, toolName
-            case toolResult, error, reason, initialPrompt
+            case toolArgs, toolResult, error, reason, initialPrompt
         }
 
         init(from decoder: Decoder) throws {
@@ -47,6 +48,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
             prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
             toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
+            toolArgsCommand = Self.decodeToolArgsCommand(c, forKey: .toolArgs)
             toolResult = try c.decodeIfPresent(ToolResult.self, forKey: .toolResult)
             error = try c.decodeIfPresent(CopilotError.self, forKey: .error)
             reason = try c.decodeIfPresent(String.self, forKey: .reason)
@@ -63,6 +65,24 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             }
             return nil
         }
+
+        private static func decodeToolArgsCommand(_ c: KeyedDecodingContainer<CodingKeys>,
+                                                  forKey key: CodingKeys) -> String?
+        {
+            if let args = try? c.decode(ToolArgs.self, forKey: key) {
+                return args.command
+            }
+            if let raw = try? c.decode(String.self, forKey: key),
+               let data = raw.data(using: .utf8),
+               let args = try? JSONDecoder().decode(ToolArgs.self, from: data) {
+                return args.command
+            }
+            return nil
+        }
+    }
+
+    private struct ToolArgs: Decodable {
+        let command: String?
     }
 
     private struct ToolResult: Decodable {
@@ -131,21 +151,33 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         }()
 
         let kind: AgentEventKind?
+        let detail: String?
         switch env.event {
-        case "sessionStart":          kind = .sessionStart
-        case "sessionEnd":            kind = .sessionEnd(reason: env.payload.reason)
-        case "userPromptSubmitted":   kind = .promptSubmit(text: env.payload.prompt)
+        case "sessionStart":
+            kind = .sessionStart
+            detail = nil
+        case "sessionEnd":
+            kind = .sessionEnd(reason: env.payload.reason)
+            detail = nil
+        case "userPromptSubmitted":
+            kind = .promptSubmit(text: env.payload.prompt)
+            detail = env.payload.prompt
         case "preToolUse":
             guard let n = env.payload.toolName else { return nil }
             kind = .toolStart(name: n)
+            detail = env.payload.toolArgsCommand
         case "postToolUse":
             guard let n = env.payload.toolName else { return nil }
             let ok = (env.payload.toolResult?.resultType ?? "success") == "success"
             kind = .toolEnd(name: n, success: ok)
+            detail = nil
         case "errorOccurred":
             guard let m = env.payload.error?.message else { return nil }
             kind = .error(message: m)
-        default:                      kind = nil
+            detail = m
+        default:
+            kind = nil
+            detail = nil
         }
         guard let k = kind else { return nil }
         return AgentEvent(
@@ -153,7 +185,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             sessionKey: sessionKey,
             cwd: cwd,
             kind: k,
-            detail: env.payload.prompt ?? env.payload.error?.message,
+            detail: detail,
             at: receivedAt
         )
     }

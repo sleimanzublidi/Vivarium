@@ -11,12 +11,103 @@ import Foundation
 /// better than mechanically suffixing "ing" (which produces "Calendaring",
 /// "Notebookediting" etc.).
 enum ToolDisplayName {
-    static func display(for toolName: String) -> String {
-        if let mapped = mapping[toolName] {
+    static func display(for toolName: String, detail: String? = nil) -> String {
+        if isShellTool(toolName),
+           let command = detail,
+           let summary = shellCommandSummary(from: command) {
+            return "\(toolName)(\(summary))" 
+        }
+
+        if let mapped = mapping[toolName.lowercased()] {
             return mapped
         }
         NSLog("[INFO] No custom message for tool '\(toolName)'")
         return toolName
+    }
+
+    static func shellCommandSummary(from command: String) -> String? {
+        let tokens = shellTokens(from: command)
+        guard !tokens.isEmpty else { return nil }
+
+        var index = 0
+        while index < tokens.count {
+            let token = tokens[index]
+            if token.contains("="), !token.hasPrefix("-"), !token.hasPrefix("/") {
+                index += 1
+                continue
+            }
+
+            let lower = token.lowercased()
+            if ["command", "builtin", "exec", "env", "nohup", "sudo", "time"].contains(lower) {
+                index += 1
+                while index < tokens.count, tokens[index].hasPrefix("-") {
+                    index += 1
+                }
+                continue
+            }
+
+            return URL(fileURLWithPath: token).lastPathComponent
+        }
+
+        return nil
+    }
+
+    private static func isShellTool(_ toolName: String) -> Bool {
+        ["bash", "shell"].contains(toolName.lowercased())
+    }
+
+    private static func shellTokens(from command: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var inSingleQuote = false
+        var inDoubleQuote = false
+        var escaping = false
+
+        for char in command.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if escaping {
+                current.append(char)
+                escaping = false
+                continue
+            }
+
+            if char == "\\", !inSingleQuote {
+                escaping = true
+                continue
+            }
+
+            if char == "'", !inDoubleQuote {
+                inSingleQuote.toggle()
+                continue
+            }
+
+            if char == "\"", !inSingleQuote {
+                inDoubleQuote.toggle()
+                continue
+            }
+
+            if !inSingleQuote, !inDoubleQuote {
+                if char.isWhitespace {
+                    appendToken(&tokens, &current)
+                    continue
+                }
+
+                if char == ";" || char == "|" || char == "&" {
+                    appendToken(&tokens, &current)
+                    break
+                }
+            }
+
+            current.append(char)
+        }
+
+        appendToken(&tokens, &current)
+        return tokens
+    }
+
+    private static func appendToken(_ tokens: inout [String], _ current: inout String) {
+        guard !current.isEmpty else { return }
+        tokens.append(current)
+        current = ""
     }
 
     private static let mapping: [String: String] = [

@@ -18,6 +18,15 @@ final class BalloonNode: SKNode {
     static let tailHeight: CGFloat = 5
     static let edgeMargin: CGFloat = 4
     static let headerBodyGap: CGFloat = 2
+    static let cloudBumpRadius: CGFloat = 7
+
+    /// Visual style for the balloon. `.speech` is a rounded rect with a
+    /// triangular tail; `.thought` is a cloud body with trailing dots, the
+    /// classic comic thought-bubble.
+    enum Style: Equatable {
+        case speech
+        case thought
+    }
 
     private static let bodyFontSize: CGFloat = 11
     private static let headerFontSize: CGFloat = 9
@@ -27,6 +36,7 @@ final class BalloonNode: SKNode {
     private let tail = SKShapeNode()
     private let header: SKLabelNode
     private let body: SKLabelNode
+    private var style: Style = .speech
 
     override init() {
         let body = SKLabelNode(fontNamed: "HelveticaNeue")
@@ -84,12 +94,14 @@ final class BalloonNode: SKNode {
                  sceneWidth: CGFloat,
                  anchorY: CGFloat,
                  ttl: TimeInterval = 8.0,
-                 sticky: Bool = false)
+                 sticky: Bool = false,
+                 style: Style = .speech)
     {
         let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
         self.header.text = trimmedHeader.isEmpty ? nil : trimmedHeader
         self.header.isHidden = trimmedHeader.isEmpty
         body.text = Self.truncate(text, max: Self.maxChars)
+        self.style = style
 
         let geom = BalloonGeometry.compute(
             headerSize: trimmedHeader.isEmpty ? .zero : self.header.calculateAccumulatedFrame().size,
@@ -121,19 +133,122 @@ final class BalloonNode: SKNode {
     }
 
     private func apply(_ g: BalloonGeometry) {
-        background.path = CGPath(roundedRect: g.bubbleRect,
-                                 cornerWidth: Self.cornerRadius,
-                                 cornerHeight: Self.cornerRadius,
-                                 transform: nil)
         header.position = g.headerPosition
         body.position = g.bodyPosition
 
-        let tailPath = CGMutablePath()
-        tailPath.move(to: g.tailBaseLeft)
-        tailPath.addLine(to: g.tailBaseRight)
-        tailPath.addLine(to: g.tailApex)
-        tailPath.closeSubpath()
-        tail.path = tailPath
+        switch style {
+        case .speech:
+            background.path = CGPath(roundedRect: g.bubbleRect,
+                                     cornerWidth: Self.cornerRadius,
+                                     cornerHeight: Self.cornerRadius,
+                                     transform: nil)
+            let tailPath = CGMutablePath()
+            tailPath.move(to: g.tailBaseLeft)
+            tailPath.addLine(to: g.tailBaseRight)
+            tailPath.addLine(to: g.tailApex)
+            tailPath.closeSubpath()
+            tail.path = tailPath
+        case .thought:
+            background.path = Self.cloudPath(in: g.bubbleRect, bumpRadius: Self.cloudBumpRadius)
+            tail.path = Self.thoughtTailPath(towardX: g.tailApex.x,
+                                             fromY: g.bubbleRect.minY,
+                                             toY: g.tailApex.y)
+        }
+    }
+
+    /// Build a cloud-shaped path as a single closed bezier outline so only
+    /// the outer silhouette gets stroked. Bump centres lie on `rect`'s
+    /// perimeter; each bump arc sweeps ~252° outward, with adjacent arcs
+    /// joined by a short straight segment that dips inward to form the
+    /// concave dent between cloud puffs. Pure helper — unit-testable without
+    /// SpriteKit.
+    static func cloudPath(in rect: CGRect, bumpRadius r: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        guard r > 0, rect.width > r, rect.height > r else {
+            path.addRect(rect)
+            return path
+        }
+
+        var bumps: [(centre: CGPoint, outward: CGFloat)] = []
+
+        // Top edge — left to right (overall traversal is clockwise in y-up
+        // coords). Outward direction = +y = π/2.
+        let topCount = max(3, Int(round(rect.width / (r * 1.7))) + 1)
+        let topStride = rect.width / CGFloat(topCount - 1)
+        for i in 0..<topCount {
+            bumps.append((CGPoint(x: rect.minX + topStride * CGFloat(i),
+                                  y: rect.maxY), .pi / 2))
+        }
+
+        // Right edge — top to bottom. Outward = +x = 0. Skip when the bubble
+        // is short, otherwise the corner bumps already cover the full edge.
+        let sideCount = max(0, Int(round(rect.height / (r * 1.8))) - 1)
+        if sideCount > 0 {
+            let sideStride = rect.height / CGFloat(sideCount + 1)
+            for i in 1...sideCount {
+                bumps.append((CGPoint(x: rect.maxX,
+                                      y: rect.maxY - sideStride * CGFloat(i)), 0))
+            }
+        }
+
+        // Bottom edge — right to left. Outward = -y = -π/2.
+        for i in 0..<topCount {
+            bumps.append((CGPoint(x: rect.maxX - topStride * CGFloat(i),
+                                  y: rect.minY), -.pi / 2))
+        }
+
+        // Left edge — bottom to top. Outward = -x = π.
+        if sideCount > 0 {
+            let sideStride = rect.height / CGFloat(sideCount + 1)
+            for i in 1...sideCount {
+                bumps.append((CGPoint(x: rect.minX,
+                                      y: rect.minY + sideStride * CGFloat(i)), .pi))
+            }
+        }
+
+        // 0.7π half-span ⇒ each bump arc covers ~252°. With CW sweep the
+        // path passes outward through each bump centre's direction, then a
+        // short edge to the next bump produces the concave dip between puffs.
+        let halfSpan: CGFloat = .pi * 0.7
+
+        for (i, bump) in bumps.enumerated() {
+            let startAngle = bump.outward + halfSpan
+            let endAngle = bump.outward - halfSpan
+            if i == 0 {
+                let entry = CGPoint(
+                    x: bump.centre.x + r * cos(startAngle),
+                    y: bump.centre.y + r * sin(startAngle))
+                path.move(to: entry)
+            }
+            path.addArc(center: bump.centre, radius: r,
+                        startAngle: startAngle, endAngle: endAngle,
+                        clockwise: true)
+        }
+
+        path.closeSubpath()
+        return path
+    }
+
+    /// Three trailing dots that shrink as they approach the pet — the
+    /// thought-bubble equivalent of the speech tail. `fromY` is the bubble's
+    /// bottom edge; `toY` is where the tail apex would point (pet centre).
+    static func thoughtTailPath(towardX x: CGFloat, fromY: CGFloat, toY: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let span = fromY - toY
+        guard span > 0 else { return path }
+        // Position from bubble (t=0) → pet (t=1); shrink so the smallest dot
+        // is closest to the pet.
+        let dots: [(t: CGFloat, radius: CGFloat)] = [
+            (0.15, 3.0),
+            (0.55, 2.0),
+            (0.95, 1.2),
+        ]
+        for dot in dots {
+            let cy = fromY - span * dot.t
+            path.addEllipse(in: CGRect(x: x - dot.radius, y: cy - dot.radius,
+                                       width: dot.radius * 2, height: dot.radius * 2))
+        }
+        return path
     }
 
     /// Truncate `s` to at most `max` characters, replacing the trailing

@@ -15,7 +15,7 @@ struct BalloonText: Equatable, Codable, Sendable {
 struct Session: Equatable, Codable, Sendable {
     let agent: AgentType
     let sessionKey: String
-    let project: ProjectIdentity
+    var project: ProjectIdentity
     let startedAt: Date
 
     var state: PetState

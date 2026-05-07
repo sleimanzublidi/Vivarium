@@ -33,7 +33,7 @@ final class EventNormalizer: @unchecked Sendable {
             return nil
         }
 
-        NSLog("[VERBOSE] Received: \(String(data: line, encoding: .utf8)!.prefix(300))")
+        NSLog("[VERBOSE] Received: \(String(data: line, encoding: .utf8)!.prefix(200))")
 
         return adapter.adapt(rawJSON: line, receivedAt: receivedAt)
     }

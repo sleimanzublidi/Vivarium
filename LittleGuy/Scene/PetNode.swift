@@ -28,6 +28,15 @@ final class PetNode: SKSpriteNode {
         play(state: state, force: false)
     }
 
+    /// Replace the underlying spritesheet for this pet, snapping the visible
+    /// texture to the new pack's first frame so callers never see a flicker
+    /// of the old pet between `swapPack` and the next `play(...)` call.
+    func swapPack(_ newPack: PetPack) {
+        self.pack = newPack
+        guard let library else { return }
+        texture = library.textures(for: currentState, in: newPack).first
+    }
+
     /// Play the waving animation once as a hello, then settle into
     /// `steadyState`. Used at spawn so a brand-new pet greets the user
     /// before going about its business. Cancels any in-flight animation.
