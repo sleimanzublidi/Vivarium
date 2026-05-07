@@ -24,17 +24,20 @@ The agent CLIs post one JSON line per hook to `~/.vivarium/sock`. Each line carr
 
 ### Claude Code (`Adapters/ClaudeCodeAdapter.swift:32`)
 
-| Claude Code hook  | `AgentEventKind`                                    |
-| ----------------- | --------------------------------------------------- |
-| `SessionStart`    | `.sessionStart`                                     |
-| `SessionEnd` / `Stop` | `.sessionEnd(reason)`                           |
-| `PreToolUse`      | `.toolStart(name)`                                  |
-| `PostToolUse`     | `.toolEnd(name, success: !is_error)`                |
-| `Notification`    | `.waitingForInput(message)`                         |
-| `PreCompact`      | `.compacting`                                       |
-| `SubagentStart` / `SubagentStop` | `.subagentStart` / `.subagentEnd`    |
-| `UserPromptSubmit`| `.promptSubmit(text)`                               |
-| anything else     | dropped (returns `nil`)                             |
+| Claude Code hook                 | `AgentEventKind`                                    |
+| -------------------------------- | --------------------------------------------------- |
+| `SessionStart`                   | `.sessionStart`                                     |
+| `SessionEnd`                     | `.sessionEnd(reason)`                               |
+| `Stop`                           | `.turnEnd` (the session continues; pet returns to idle via a brief celebration) |
+| `StopFailure`                    | `.error(message)` (one or more `Stop` hooks failed) |
+| `PreToolUse`                     | `.toolStart(name)`                                  |
+| `PostToolUse`                    | `.toolEnd(name, success: !is_error)`                |
+| `Notification`                   | `.waitingForInput(message)`                         |
+| `PermissionRequest`              | `.waitingForInput("Approve <tool>?")`               |
+| `PreCompact`                     | `.compacting`                                       |
+| `SubagentStart` / `SubagentStop` | `.subagentStart` / `.subagentEnd`                   |
+| `UserPromptSubmit`               | `.promptSubmit(text)`                               |
+| anything else                    | dropped (returns `nil`)                             |
 
 `sessionKey = payload.session_id` — Claude Code provides one natively.
 
@@ -49,7 +52,7 @@ The agent CLIs post one JSON line per hook to `~/.vivarium/sock`. Each line carr
 | `postToolUse`           | `.toolEnd(name, success: resultType == "success")`     |
 | `errorOccurred`         | `.error(message)`                                      |
 
-Copilot has no `Notification` / waiting-for-input hook and no compact / subagent concept — those state transitions just don't happen for Copilot pets (per spec §4). Copilot also has no built-in session id, so the adapter synthesizes one from `sha1(cwd + ppid + timestamp)` on the first `sessionStart` and reuses it for the same `(cwd, ppid)` pair until `sessionEnd` (`Adapters/CopilotCLIAdapter.swift:48`).
+Copilot has no `Notification` / `PermissionRequest` / `StopFailure` / compact / subagent concept — those state transitions just don't happen for Copilot pets (per spec §4). Modern Copilot CLI builds provide `payload.sessionId`; older builds don't, in which case the adapter synthesizes one from `sha1(cwd + ppid + sessionStart.timestamp)` and reuses it for the same `(cwd, ppid)` pair until `sessionEnd`.
 
 After this stage every input is a uniform:
 
@@ -66,47 +69,35 @@ struct AgentEvent {
 
 ## Stage 2 — `AgentEventKind` → `PetState`
 
-`SessionStore.apply(event)` (`Sessions/SessionStore.swift:38`) is the state machine. `sessionStart` and `sessionEnd` are handled specially (create / remove the `Session`); every other kind runs through one switch:
+`SessionStore.apply(event)` is the state machine. `sessionStart` and `sessionEnd` are handled specially (create / remove the `Session`); every other kind drives a state transition. The event-kind → state table:
 
-```swift
-case .toolStart:                s.state = .running
-case .toolEnd(_, let success):  s.state = success ? .idle : .failed
-case .promptSubmit:             s.state = .review
-case .waitingForInput(let m):
-    s.state = .waiting
-    if let m { s.lastBalloon = BalloonText(text: m, postedAt: event.at) }
-case .compacting:               s.state = .review
-case .subagentStart:            s.subagentDepth += 1
-case .subagentEnd:              s.subagentDepth = max(0, s.subagentDepth - 1)
-case .error(let m):
-    s.state = .failed
-    s.lastBalloon = BalloonText(text: m, postedAt: event.at)
-```
+| `AgentEventKind`                  | resulting `PetState`                                                |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `.sessionStart`                   | new `Session`, `state = .idle`                                      |
+| `.sessionEnd`                     | session removed entirely                                            |
+| `.toolStart(name)`                | `.running` (+ tool-name balloon, with command for Bash/Shell)       |
+| `.toolEnd(success: true)`         | **stays `.running`** — agents typically chain tools within a turn   |
+| `.toolEnd(success: false)`        | `.failed`                                                           |
+| `.turnEnd`                        | temporary `.jumping` (~1.8 s celebration), then fallback to `.idle` |
+| `.promptSubmit`                   | `.review` (+ "Thinking…" balloon)                                   |
+| `.waitingForInput(message)`       | `.waiting` (+ message balloon)                                      |
+| `.compacting`                     | `.review` (+ "Compacting…" balloon)                                 |
+| `.subagentStart` / `.subagentEnd` | no state change; bumps `subagentDepth ±1`                           |
+| `.error(message)`                 | `.failed` (+ error message balloon)                                 |
 
-So the *event-kind → state* table is:
+The states `.runningRight`, `.runningLeft`, `.waving`, `.jumping` are not reached by any agent event directly; they're driven by the scene and store as transient animations:
 
-| `AgentEventKind`              | resulting `PetState`                       |
-| ----------------------------- | ------------------------------------------ |
-| `.toolStart`                  | `.running`                                 |
-| `.toolEnd(success: true)`     | `.idle`                                    |
-| `.toolEnd(success: false)`    | `.failed`                                  |
-| `.promptSubmit`               | `.review`                                  |
-| `.waitingForInput`            | `.waiting` (+ sets `lastBalloon`)          |
-| `.compacting`                 | `.review`                                  |
-| `.subagentStart` / `.subagentEnd` | no state change; bumps `subagentDepth ±1` |
-| `.error`                      | `.failed` (+ sets `lastBalloon`)           |
-| `.sessionStart`               | new `Session`, `state = .idle`             |
-| `.sessionEnd`                 | session removed entirely                   |
-
-The states `.runningRight`, `.runningLeft`, `.waving`, `.jumping` exist in `PetState` (with their own spritesheet rows) but no agent event maps to them — they're reserved for spawn / despawn / wandering animations the spec describes in §8 ("new pet enters from off-screen, runs to its slot… despawn = wave + run off"). That UX is deferred per Plan 1, so today those states are unreachable.
+- `.runningLeft` / `.runningRight` — played by `SceneDirector` while a pet is moving to a new layout slot, and during idle wandering.
+- `.waving` — played on spawn (greeting) and on despawn (goodbye), and on left-click of an idle pet ("greet").
+- `.jumping` — played briefly on `.turnEnd` and as the visual transition when the agent-idle timeout reverts a session from `.running` to `.idle`.
 
 ### Lenient mode
 
-If a known session receives an event but it's the *first* event we've seen (e.g. the app started mid-session, or recovered from a crash), `SessionStore.apply` synthesizes a session from the event rather than dropping it (`SessionStore.swift:53-67`, the "lenient mode" comment). The state still comes from the same switch above.
+If a non-start event arrives for an unknown session (e.g. the app started mid-session, or recovered from a crash), `SessionStore.apply` synthesizes a session from the event rather than dropping it. The state then comes from the same table above.
 
-### Self-emitted waiting (planned)
+### Agent-idle auto-revert
 
-Spec §4 calls for `SessionStore` to self-emit `.waitingForInput` after the idle timeout when no `pre/postToolUse` or `userPromptSubmitted` arrives within ~30 s of the last `postToolUse`. The timer isn't wired up in the current code; today the only path to `.waiting` is an explicit `Notification` from Claude Code.
+`SessionStore` runs a per-session timer that fires after `agentIdleTimeout` (default 30 s) of no events. If a session is still `.running` when it fires, it's reverted through a brief `.jumping` celebration to `.idle`. Sessions sitting in `.waiting` or `.failed` are exempt — those states represent "needs user attention" and shouldn't be cleared automatically. This is the reason `.toolEnd(success: true)` stays `.running` (above): chained tools refresh the timer, and a real pause falls back via this path.
 
 ## Stage 3 — `PetState` → animation
 
@@ -115,10 +106,10 @@ Spec §4 calls for `SessionStore` to self-emit `.waitingForInput` after the idle
 | `PetState`     | row | frames × dur   | meaning                                |
 | -------------- | --- | -------------- | -------------------------------------- |
 | `.idle`        | 0   | 6 × 1100 ms    | calm                                   |
-| `.runningRight`| 1   | 8 × 1060 ms    | wander right (unused today)            |
-| `.runningLeft` | 2   | 8 × 1060 ms    | wander left (unused today)             |
-| `.waving`      | 3   | 4 × 700 ms     | spawn / despawn (unused today)         |
-| `.jumping`     | 4   | 5 × 840 ms     | unused today                           |
+| `.runningRight`| 1   | 8 × 1060 ms    | layout move right; idle wander         |
+| `.runningLeft` | 2   | 8 × 1060 ms    | layout move left; idle wander; despawn |
+| `.waving`      | 3   | 4 × 700 ms     | spawn greeting; click-to-greet         |
+| `.jumping`     | 4   | 5 × 840 ms     | turn-end celebration; idle auto-revert |
 | `.failed`      | 5   | 8 × 1220 ms    | tool errored                           |
 | `.waiting`     | 6   | 6 × 1010 ms    | waiting on user                        |
 | `.running`     | 7   | 6 × 820 ms     | tool in progress                       |
@@ -129,25 +120,28 @@ Spec §4 calls for `SessionStore` to self-emit `.waitingForInput` after the idle
 > User types a prompt in Claude Code
 > → `UserPromptSubmit` hook
 > → adapter emits `.promptSubmit`
-> → store sets `state = .review`
+> → store sets `state = .review` + "Thinking…" balloon
 > → director plays row 8.
 >
 > Claude calls a tool
 > → `PreToolUse` → `.toolStart` → `state = .running` → row 7.
 >
 > Tool returns successfully
-> → `PostToolUse` (`is_error: false`) → `.toolEnd(success: true)` → `state = .idle` → row 0.
+> → `PostToolUse` (`is_error: false`) → `.toolEnd(success: true)` → **stays `.running`** (chained tools likely incoming).
 >
-> Claude finishes its turn and pings the user
-> → `Notification` → `.waitingForInput(message)`
-> → `state = .waiting`, `lastBalloon` set
-> → row 6 + sticky balloon (project label header + message body).
+> Claude needs the user to approve the next tool
+> → `PermissionRequest` → `.waitingForInput("Approve <tool>?")`
+> → `state = .waiting` → row 6 + sticky balloon.
+>
+> User approves; Claude finishes its turn
+> → `Stop` → `.turnEnd` → temporary `.jumping` (~1.8 s, row 4) → `.idle` (row 0).
+>
+> A `Stop` hook then fails
+> → `StopFailure` → `.error(reason)` → `state = .failed` → row 5 + error balloon.
 
 ## Things intentionally **not** wired through this pipeline
 
 - **Subagent depth.** `.subagentStart` / `.subagentEnd` mutate `Session.subagentDepth` only; no state animation. Reserved for a future visual badge.
-- **Idle-timeout self-trigger** for `.waiting`. Defined in the spec, timer not yet running.
-- **Spawn / despawn / wandering** animations (`.runningRight`, `.runningLeft`, `.waving`). Rows exist on the spritesheet, no event ever puts a pet into them.
 
 ## File reference
 
