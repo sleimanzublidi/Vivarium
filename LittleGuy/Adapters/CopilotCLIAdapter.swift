@@ -22,14 +22,17 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         let cwd: String?
         let prompt: String?
         let toolName: String?
-        let toolArgs: String?
+        // Note: Copilot CLI emits `toolArgs` as a JSON object whose shape is
+        // tool-specific. We don't currently use it — listing it here as a
+        // String would make `init(from:)` throw a typeMismatch and kill
+        // the whole envelope decode on every preToolUse / postToolUse.
         let toolResult: ToolResult?
         let error: CopilotError?
         let reason: String?
         let initialPrompt: String?
 
         private enum CodingKeys: String, CodingKey {
-            case timestamp, sessionId, cwd, prompt, toolName, toolArgs
+            case timestamp, sessionId, cwd, prompt, toolName
             case toolResult, error, reason, initialPrompt
         }
 
@@ -44,7 +47,6 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
             prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
             toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
-            toolArgs = try c.decodeIfPresent(String.self, forKey: .toolArgs)
             toolResult = try c.decodeIfPresent(ToolResult.self, forKey: .toolResult)
             error = try c.decodeIfPresent(CopilotError.self, forKey: .error)
             reason = try c.decodeIfPresent(String.self, forKey: .reason)

@@ -104,4 +104,20 @@ final class CopilotCLIAdapterTests: XCTestCase {
         XCTAssertEqual(s.sessionKey, e.sessionKey)
         XCTAssertEqual(e.kind, .sessionEnd(reason: "user_exit"))
     }
+
+    /// Regression: real Copilot CLI emits `toolArgs` as a JSON object whose
+    /// shape varies per tool (e.g. `view` → {path, view_range}). Earlier the
+    /// adapter declared `toolArgs: String?`, so JSONDecoder threw a
+    /// typeMismatch and dropped *every* preToolUse / postToolUse — that was
+    /// why no tool balloons ever appeared.
+    func test_realCopilot_preToolUse_acceptsObjectToolArgs() throws {
+        let e = try XCTUnwrap(try adapt("pre-tool-use-real"))
+        XCTAssertEqual(e.kind, .toolStart(name: "view"))
+        XCTAssertEqual(e.sessionKey, "c808dc63-ff21-4fea-ab88-e400498fbd3e")
+    }
+
+    func test_realCopilot_postToolUse_acceptsObjectToolArgs() throws {
+        let e = try XCTUnwrap(try adapt("post-tool-use-real"))
+        XCTAssertEqual(e.kind, .toolEnd(name: "view", success: true))
+    }
 }

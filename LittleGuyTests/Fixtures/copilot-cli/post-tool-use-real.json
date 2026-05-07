@@ -1,0 +1,19 @@
+{
+  "agent": "copilot-cli",
+  "event": "postToolUse",
+  "pid": 20649,
+  "ppid": 20619,
+  "payload": {
+    "timestamp": 1778111420895,
+    "sessionId": "c808dc63-ff21-4fea-ab88-e400498fbd3e",
+    "cwd": "/Users/sleimanzublidi/Source/LittleGuy",
+    "toolName": "view",
+    "toolArgs": {
+      "path": "/Users/sleimanzublidi/Source/LittleGuy/LittleGuy/Sessions/ProjectResolver.swift",
+      "view_range": [71, 170]
+    },
+    "toolResult": {
+      "textResultForLlm": "71. final class GlobalSettingsStore { ..."
+    }
+  }
+}

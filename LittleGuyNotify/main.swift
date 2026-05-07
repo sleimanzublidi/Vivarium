@@ -38,10 +38,25 @@ if let explicit = event {
     resolvedEvent = ""
 }
 
+// Copilot CLI's hook stdin doesn't include `cwd`. The hook runs as a child
+// of the Copilot CLI process so our own working directory == Copilot's,
+// which is the project the user is invoking the agent in. Inject it into
+// the payload (without overriding anything the agent may already provide,
+// like Claude Code's `cwd`) so the downstream adapter can resolve a project.
+let payloadAny: Any
+if var dict = stdinJSON as? [String: Any] {
+    if dict["cwd"] == nil {
+        dict["cwd"] = FileManager.default.currentDirectoryPath
+    }
+    payloadAny = dict
+} else {
+    payloadAny = stdinJSON
+}
+
 let envelope: [String: Any] = [
     "agent": agent,
     "event": resolvedEvent,
-    "payload": stdinJSON,
+    "payload": payloadAny,
     "pid": getpid(),
     "ppid": getppid(),
     "receivedAt": Date().timeIntervalSince1970,
