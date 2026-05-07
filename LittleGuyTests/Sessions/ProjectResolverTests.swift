@@ -107,6 +107,92 @@ final class ProjectResolverTests: XCTestCase {
         XCTAssertEqual(saved.projectPets[key], "c")
     }
 
+    func test_samplePetIsNeverPersistedAsProjectMapping() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        var chooseCalled = false
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { petIDs in
+            chooseCalled = true
+            XCTAssertFalse(petIDs.contains("sample-pet"))
+            return "bitboy"
+        }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: ["sample-pet", "bitboy"],
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: project, agent: .copilotCli).petId, "bitboy")
+        XCTAssertTrue(chooseCalled)
+
+        let saved = try JSONDecoder().decode(GlobalSettingsStore.Settings.self,
+                                             from: Data(contentsOf: settingsURL))
+        XCTAssertEqual(saved.projectPets[GlobalSettingsStore.projectAgentKey(for: project, agent: .copilotCli)], "bitboy")
+        XCTAssertFalse(saved.projectPets.values.contains("sample-pet"))
+    }
+
+    func test_existingSamplePetMappingIsReplacedAndRemovedFromSettings() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        let otherProject = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+            try? FileManager.default.removeItem(at: otherProject)
+        }
+
+        let key = GlobalSettingsStore.projectAgentKey(for: project, agent: .claudeCode)
+        let otherKey = GlobalSettingsStore.projectAgentKey(for: otherProject, agent: .copilotCli)
+        let existing = GlobalSettingsStore.Settings(projectPets: [
+            key: "sample-pet",
+            otherKey: "sample-pet"
+        ])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { petIDs in
+            XCTAssertEqual(petIDs, ["bitboy"])
+            return "bitboy"
+        }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: ["sample-pet", "bitboy"],
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: project, agent: .claudeCode).petId, "bitboy")
+
+        let saved = try JSONDecoder().decode(GlobalSettingsStore.Settings.self,
+                                             from: Data(contentsOf: settingsURL))
+        XCTAssertEqual(saved.projectPets, [key: "bitboy"])
+    }
+
+    func test_onlySamplePetAvailableFallsBackWithoutWritingSettings() {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in
+            XCTFail("sample-pet must not be offered as a persistable choice")
+            return "sample-pet"
+        }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: ["sample-pet"],
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: project, agent: .claudeCode).petId, "sample-pet")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: settingsURL.path))
+    }
+
     func test_unmappedProjectPrefersUnassignedAvailablePet() throws {
         let settingsDir = makeTempDir()
         let settingsURL = settingsDir.appendingPathComponent("settings.json")

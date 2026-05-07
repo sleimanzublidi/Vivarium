@@ -92,6 +92,7 @@ final class GlobalSettingsStore {
 
     static let defaultSettingsURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".littleguy/settings.json")
+    private static let nonPersistablePetIDs: Set<String> = ["sample-pet"]
 
     private let settingsURL: URL
     private let fileManager: FileManager
@@ -115,16 +116,23 @@ final class GlobalSettingsStore {
         lock.lock()
         defer { lock.unlock() }
 
-        let available = Self.uniquePetIDs(availablePetIDs)
-        guard !available.isEmpty else { return fallbackPetID }
-
         let key = Self.projectAgentKey(for: projectURL, agent: agent)
         var settings = loadSettings()
-        if let saved = settings.projectPets[key], available.contains(saved) {
+        let removedNonPersistable = removeNonPersistablePetAssignments(from: &settings)
+
+        let available = Self.uniquePetIDs(availablePetIDs)
+        let persistableAvailable = available.filter(Self.isPersistablePetID)
+        guard !persistableAvailable.isEmpty else {
+            if removedNonPersistable { saveSettings(settings) }
+            return fallbackPetID
+        }
+
+        if let saved = settings.projectPets[key], persistableAvailable.contains(saved) {
+            if removedNonPersistable { saveSettings(settings) }
             return saved
         }
 
-        let selected = chooseAvailablePetID(from: candidatePetIDs(in: settings, availablePetIDs: available))
+        let selected = chooseAvailablePetID(from: candidatePetIDs(in: settings, availablePetIDs: persistableAvailable))
         settings.projectPets[key] = selected
         saveSettings(settings)
         return selected
@@ -141,6 +149,16 @@ final class GlobalSettingsStore {
     private static func uniquePetIDs(_ petIDs: [String]) -> [String] {
         var seen = Set<String>()
         return petIDs.filter { seen.insert($0).inserted }
+    }
+
+    private static func isPersistablePetID(_ petID: String) -> Bool {
+        !nonPersistablePetIDs.contains(petID)
+    }
+
+    private func removeNonPersistablePetAssignments(from settings: inout Settings) -> Bool {
+        let original = settings.projectPets
+        settings.projectPets = settings.projectPets.filter { Self.isPersistablePetID($0.value) }
+        return settings.projectPets != original
     }
 
     private func candidatePetIDs(in settings: Settings, availablePetIDs: [String]) -> [String] {
