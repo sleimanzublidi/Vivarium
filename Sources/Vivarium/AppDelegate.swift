@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let petIds = outcome.packs.map(\.manifest.id)
-        let defaultID = outcome.packs.randomElement()?.manifest.id ?? "sample-pet"
+        let defaultID = "sample-pet"
         petRegistry.reset(availablePetIDs: petIds, defaultPetID: defaultID)
 
         logger.info("App launched. \(outcome.packs.count) pets found. default: \(defaultID)")

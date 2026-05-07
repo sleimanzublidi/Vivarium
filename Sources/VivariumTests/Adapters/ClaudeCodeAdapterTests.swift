@@ -76,6 +76,22 @@ final class ClaudeCodeAdapterTests: XCTestCase {
         XCTAssertEqual(e.kind, .sessionEnd(reason: "exit"))
     }
 
+    func test_permissionRequest_isWaitingForInput() throws {
+        // PermissionRequest fires when a tool needs user approval — the
+        // agent is blocked, so the pet should sit in .waiting with the
+        // tool name surfaced in the balloon.
+        let e = try XCTUnwrap(try adapt("permission-request"))
+        XCTAssertEqual(e.kind, .waitingForInput(message: "Approve Bash?"))
+        XCTAssertEqual(e.detail, "Bash")
+    }
+
+    func test_stopFailure_isError() throws {
+        // StopFailure means a Stop hook itself failed — surface as an
+        // error so the pet flips to .failed and shows the reason.
+        let e = try XCTUnwrap(try adapt("stop-failure"))
+        XCTAssertEqual(e.kind, .error(message: "Stop hook exited 1: tests failed"))
+    }
+
     func test_malformedEmpty_returnsNil() throws {
         XCTAssertNil(try adapt("malformed-empty"))
     }

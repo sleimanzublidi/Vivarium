@@ -52,6 +52,21 @@ struct ClaudeCodeAdapter: EventAdapter {
         case "Stop":
             kind = .turnEnd
             detail = nil
+        case "StopFailure":
+            let msg = env.payload.message ?? env.payload.reason ?? "Stop hook failed"
+            kind = .error(message: msg)
+            detail = msg
+        case "PermissionRequest":
+            let msg: String
+            if let m = env.payload.message {
+                msg = m
+            } else if let t = env.payload.tool_name {
+                msg = "Approve \(t)?"
+            } else {
+                msg = "Permission requested"
+            }
+            kind = .waitingForInput(message: msg)
+            detail = env.payload.tool_name
         case "PreToolUse":
             guard let n = env.payload.tool_name else { return nil }
             kind = .toolStart(name: n)
