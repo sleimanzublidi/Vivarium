@@ -126,22 +126,22 @@ Spec §4 calls for `SessionStore` to self-emit `.waitingForInput` after the idle
 
 ## Worked example
 
-> User types a prompt in Claude Code  
->   → `UserPromptSubmit` hook  
->   → adapter emits `.promptSubmit`  
->   → store sets `state = .review`  
->   → director plays row 8.
+> User types a prompt in Claude Code
+> → `UserPromptSubmit` hook
+> → adapter emits `.promptSubmit`
+> → store sets `state = .review`
+> → director plays row 8.
 >
-> Claude calls a tool  
->   → `PreToolUse` → `.toolStart` → `state = .running` → row 7.
+> Claude calls a tool
+> → `PreToolUse` → `.toolStart` → `state = .running` → row 7.
 >
-> Tool returns successfully  
->   → `PostToolUse` (`is_error: false`) → `.toolEnd(success: true)` → `state = .idle` → row 0.
+> Tool returns successfully
+> → `PostToolUse` (`is_error: false`) → `.toolEnd(success: true)` → `state = .idle` → row 0.
 >
-> Claude finishes its turn and pings the user  
->   → `Notification` → `.waitingForInput(message)`  
->   → `state = .waiting`, `lastBalloon` set  
->   → row 6 + sticky balloon (project label header + message body).
+> Claude finishes its turn and pings the user
+> → `Notification` → `.waitingForInput(message)`
+> → `state = .waiting`, `lastBalloon` set
+> → row 6 + sticky balloon (project label header + message body).
 
 ## Things intentionally **not** wired through this pipeline
 
@@ -151,14 +151,14 @@ Spec §4 calls for `SessionStore` to self-emit `.waitingForInput` after the idle
 
 ## File reference
 
-| Concern                          | File                                            |
-| -------------------------------- | ----------------------------------------------- |
-| Hook payload schema (Claude Code)| `Adapters/ClaudeCodeAdapter.swift`              |
-| Hook payload schema (Copilot CLI)| `Adapters/CopilotCLIAdapter.swift`              |
-| Adapter dispatch                 | `Adapters/EventAdapter.swift`                   |
-| Unified event model              | `Models/AgentEvent.swift`                       |
-| Pet state enum + Codex rows      | `Models/PetState.swift`                         |
-| Codex layout / row specs         | `Models/PetPack.swift`                          |
-| Session state machine            | `Sessions/SessionStore.swift`                   |
-| Pet animation playback           | `Scene/PetNode.swift`                           |
-| Visibility / balloon orchestration | `Scene/SceneDirector.swift`                  |
+| Concern                            | File                                            |
+| -----------------------------------| ----------------------------------------------- |
+| Hook payload schema (Claude Code)  | `Adapters/ClaudeCodeAdapter.swift`              |
+| Hook payload schema (Copilot CLI)  | `Adapters/CopilotCLIAdapter.swift`              |
+| Adapter dispatch                   | `Adapters/EventAdapter.swift`                   |
+| Unified event model                 | `Models/AgentEvent.swift`                       |
+| Pet state enum + Codex rows        | `Models/PetState.swift`                         |
+| Codex layout / row specs           | `Models/PetPack.swift`                          |
+| Session state machine              | `Sessions/SessionStore.swift`                   |
+| Pet animation playback             | `Scene/PetNode.swift`                           |
+| Visibility / balloon orchestration | `Scene/SceneDirector.swift`                     |
