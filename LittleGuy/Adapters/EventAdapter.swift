@@ -32,6 +32,9 @@ final class EventNormalizer: @unchecked Sendable {
             NSLog("[WARNING] unrecognized agent")
             return nil
         }
+
+        NSLog("[VERBOSE] Received: \(String(data: line, encoding: .utf8)!.prefix(300))")
+
         return adapter.adapt(rawJSON: line, receivedAt: receivedAt)
     }
 }

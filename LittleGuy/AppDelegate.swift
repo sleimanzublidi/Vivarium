@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             server = try SocketServer(socketURL: socketURL) { [store] line in
                 let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
                 if let event = normalizer.normalize(line: line) {
-                    NSLog("[INFO] sock OK agent=\(event.agent.rawValue) kind=\(event.kind) sessionKey=\(event.sessionKey) cwd=\(event.cwd.path)")
+                    NSLog("[VERBOSE] sock OK agent=\(event.agent.rawValue) kind=\(event.kind) sessionKey=\(event.sessionKey) cwd=\(event.cwd.path)")
                     await store.apply(event)
                 } else {
                     NSLog("[WARNING] sock DROPPED (\(line.count)B) — \(preview)")

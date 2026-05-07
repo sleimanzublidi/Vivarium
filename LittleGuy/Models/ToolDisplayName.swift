@@ -12,7 +12,11 @@ import Foundation
 /// "Notebookediting" etc.).
 enum ToolDisplayName {
     static func display(for toolName: String) -> String {
-        mapping[toolName.lowercased()] ?? toolName
+        if let mapped = mapping[toolName] {
+            return mapped
+        }
+        NSLog("[INFO] No custom message for tool '\(toolName)'")
+        return toolName
     }
 
     private static let mapping: [String: String] = [
@@ -37,6 +41,8 @@ enum ToolDisplayName {
         "killshell":       "Killing shell",
         "monitor":         "Monitoring",
         "skill":           "Using a skill",
+        "taskcreate":      "Creating a task",
+        "taskupdate":      "Updating a task",
 
         // Copilot CLI tool names (lowercase as the adapter receives them).
         "shell":           "Running shell",

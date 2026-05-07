@@ -63,7 +63,11 @@ final class SceneDirector {
     /// set against `maxVisiblePets`, plays the new state, and presents a
     /// balloon if there's a fresh one.
     func addOrUpdate(session: Session) {
-        print("addOrUpdate: \(session.project.label) \(session.state.rawValue)")
+        if let text = session.lastBalloon?.text, !text.isEmpty {
+            NSLog("[Director] \(session.project.label):\(session.agent) \(session.project.petId) \(session.state.rawValue) '\(text)'")
+        } else {
+            NSLog("[Director] \(session.project.label):\(session.agent) \(session.project.petId) \(session.state.rawValue)")
+        }
 
         sessions[session.sessionKey] = session
         reconcileVisibility()
