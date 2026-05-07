@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tank: FloatingTank!
     private var library: PetLibrary!
     private var statusItem: NSStatusItem!
+    private let petRegistry = InstalledPetRegistry()
     private let normalizer = EventNormalizer(adapters: [
         ClaudeCodeAdapter(),
         CopilotCLIAdapter(),
@@ -34,11 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let petIds = outcome.packs.map(\.manifest.id)
         let defaultID = outcome.packs.randomElement()?.manifest.id ?? "sample-pet"
+        petRegistry.reset(availablePetIDs: petIds, defaultPetID: defaultID)
 
-        let resolver = ProjectResolver(overrides: [],
-                                       defaultPetID: defaultID,
-                                       availablePetIDs: petIds,
-                                       settingsStore: GlobalSettingsStore(settingsURL: settingsURL))
+        let resolver = ProjectResolver(
+            overrides: [],
+            defaultPetIDProvider: { [petRegistry] in petRegistry.defaultPetID },
+            availablePetIDsProvider: { [petRegistry] in petRegistry.availablePetIDs },
+            settingsStore: GlobalSettingsStore(settingsURL: settingsURL))
         store = SessionStore(resolver: resolver, idleTimeout: 600)
 
         director = SceneDirector(library: library,
@@ -76,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         tank = FloatingTank(scene: director.scene)
+        tank.onPetZipDropped = { [weak self] urls in
+            self?.installDroppedPetZips(urls)
+        }
         tank.makeKeyAndOrderFront(nil)
 
         installMenuBarItem()
@@ -123,5 +129,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Pet installation
+
+    private func installDroppedPetZips(_ zipURLs: [URL]) {
+        for zipURL in zipURLs {
+            installDroppedPetZip(zipURL)
+        }
+    }
+
+    private func installDroppedPetZip(_ zipURL: URL) {
+        let scoped = zipURL.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { zipURL.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let pack = try library.installPack(fromZip: zipURL, into: userPetsDir)
+            petRegistry.register(petID: pack.manifest.id)
+            director.register(pack: pack)
+            director.previewInstalledPet(pack)
+            NSLog("[INFO] installed pet \(pack.manifest.id) from \(zipURL.path)")
+        } catch {
+            NSLog("[ERROR] failed to install pet from \(zipURL.path): \(error)")
+            presentInstallFailure(zipURL: zipURL, error: error)
+        }
+    }
+
+    private func presentInstallFailure(zipURL: URL, error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Could not install pet"
+        alert.informativeText = "\(zipURL.lastPathComponent): \(error.localizedDescription)"
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+}
+
+private final class InstalledPetRegistry {
+    private let lock = NSLock()
+    private var ids: [String] = []
+    private var fallbackID = "sample-pet"
+
+    var availablePetIDs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return ids
+    }
+
+    var defaultPetID: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return fallbackID
+    }
+
+    func reset(availablePetIDs: [String], defaultPetID: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        ids = Self.unique(availablePetIDs)
+        fallbackID = defaultPetID
+    }
+
+    func register(petID: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if !ids.contains(petID) {
+            ids.append(petID)
+        }
+        if fallbackID == "sample-pet", ids.count == 1, petID != "sample-pet" {
+            fallbackID = petID
+        }
+    }
+
+    private static func unique(_ petIDs: [String]) -> [String] {
+        var seen = Set<String>()
+        return petIDs.filter { seen.insert($0).inserted }
     }
 }

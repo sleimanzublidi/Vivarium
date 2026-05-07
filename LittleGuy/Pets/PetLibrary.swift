@@ -9,6 +9,32 @@ final class PetLibrary {
         case error(PetIssue)
     }
 
+    enum InstallError: Error, Equatable, LocalizedError {
+        case unsupportedFile(URL)
+        case extractionFailed(String)
+        case missingPackRoot
+        case invalidPetID(String)
+        case invalidPack(PetIssue)
+        case fileSystem(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedFile(let url):
+                return "\(url.lastPathComponent) is not a zip file."
+            case .extractionFailed(let message):
+                return "Could not unzip the pet pack: \(message)"
+            case .missingPackRoot:
+                return "The zip must contain pet.json and a spritesheet, either at the root or inside one top-level folder."
+            case .invalidPetID(let id):
+                return "The pet id \"\(id)\" is not safe to install."
+            case .invalidPack(let issue):
+                return "The pet pack is invalid: \(issue)"
+            case .fileSystem(let message):
+                return "Could not install the pet pack: \(message)"
+            }
+        }
+    }
+
     enum PetIssue: Equatable {
         case missingManifest
         case invalidManifest(String)
@@ -46,6 +72,9 @@ final class PetLibrary {
         }
         guard FileManager.default.fileExists(atPath: spritesheetURL.path) else {
             return .error(.missingSpritesheet)
+        }
+        guard Self.isChild(spritesheetURL, of: directory) else {
+            return .error(.invalidSpritesheet("spritesheet path escapes pack directory"))
         }
 
         guard let nsImage = NSImage(contentsOf: spritesheetURL),
@@ -90,6 +119,179 @@ final class PetLibrary {
             out.append(t)
         }
         return out
+    }
+}
+
+// MARK: - Installation
+
+extension PetLibrary {
+    /// Install a dropped zip into the user's pet directory and return the
+    /// validated pack from its final on-disk location.
+    func installPack(fromZip zipURL: URL, into userPetsDir: URL) throws -> PetPack {
+        guard zipURL.pathExtension.lowercased() == "zip" else {
+            throw InstallError.unsupportedFile(zipURL)
+        }
+
+        let fm = FileManager.default
+        let stagingDir = fm.temporaryDirectory
+            .appendingPathComponent("littleguy-pet-install-\(UUID().uuidString)", isDirectory: true)
+        try createDirectory(at: stagingDir)
+        defer { try? fm.removeItem(at: stagingDir) }
+
+        try extractZip(zipURL, to: stagingDir)
+        guard let packRoot = findPackRoot(in: stagingDir) else {
+            throw InstallError.missingPackRoot
+        }
+
+        let stagedPack: PetPack
+        switch loadPack(at: packRoot) {
+        case .ok(let pack):
+            stagedPack = pack
+        case .error(let issue):
+            throw InstallError.invalidPack(issue)
+        }
+
+        guard Self.isSafePetID(stagedPack.manifest.id) else {
+            throw InstallError.invalidPetID(stagedPack.manifest.id)
+        }
+
+        try createDirectory(at: userPetsDir)
+        let destination = userPetsDir.appendingPathComponent(stagedPack.manifest.id, isDirectory: true)
+        guard Self.isChild(destination, of: userPetsDir) else {
+            throw InstallError.invalidPetID(stagedPack.manifest.id)
+        }
+
+        let replacement = userPetsDir
+            .appendingPathComponent(".install-\(stagedPack.manifest.id)-\(UUID().uuidString)", isDirectory: true)
+        try copyPack(from: packRoot, to: replacement)
+        try moveReplacement(replacement, to: destination)
+
+        switch loadPack(at: destination) {
+        case .ok(let pack):
+            return pack
+        case .error(let issue):
+            throw InstallError.invalidPack(issue)
+        }
+    }
+
+    static func isSafePetID(_ id: String) -> Bool {
+        id.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"#,
+                 options: .regularExpression) != nil
+    }
+
+    private func extractZip(_ zipURL: URL, to destination: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-x", "-k", zipURL.path, destination.path]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            throw InstallError.extractionFailed(String(describing: error))
+        }
+
+        guard process.terminationStatus == 0 else {
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallback = "ditto exited with \(process.terminationStatus)"
+            throw InstallError.extractionFailed(message?.isEmpty == false ? message ?? fallback : fallback)
+        }
+
+        guard extractedContentsStayInside(destination) else {
+            throw InstallError.extractionFailed("archive contained unsafe paths")
+        }
+    }
+
+    private func findPackRoot(in extractedDir: URL) -> URL? {
+        let manifestURL = extractedDir.appendingPathComponent("pet.json")
+        if FileManager.default.fileExists(atPath: manifestURL.path) {
+            return extractedDir
+        }
+
+        let entries = visibleEntries(in: extractedDir)
+        let candidateDirs = entries.filter { url in
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+                  isDir.boolValue
+            else { return false }
+            return FileManager.default.fileExists(atPath: url.appendingPathComponent("pet.json").path)
+        }
+
+        return candidateDirs.count == 1 ? candidateDirs[0] : nil
+    }
+
+    private func visibleEntries(in directory: URL) -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(at: directory,
+                                                                    includingPropertiesForKeys: [.isDirectoryKey],
+                                                                    options: [.skipsHiddenFiles])) ?? []
+        return entries.filter { $0.lastPathComponent != "__MACOSX" }
+    }
+
+    private func extractedContentsStayInside(_ directory: URL) -> Bool {
+        let base = directory.standardizedFileURL.path
+        guard let enumerator = FileManager.default.enumerator(at: directory,
+                                                              includingPropertiesForKeys: nil,
+                                                              options: [.skipsHiddenFiles])
+        else { return true }
+
+        for case let url as URL in enumerator {
+            let path = url.standardizedFileURL.path
+            guard path == base || path.hasPrefix(base + "/") else { return false }
+        }
+        return true
+    }
+
+    private func copyPack(from source: URL, to destination: URL) throws {
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+        } catch {
+            throw InstallError.fileSystem(String(describing: error))
+        }
+    }
+
+    private func moveReplacement(_ replacement: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        let backup = destination.deletingLastPathComponent()
+            .appendingPathComponent(".replace-\(destination.lastPathComponent)-\(UUID().uuidString)", isDirectory: true)
+        let hadExisting = fm.fileExists(atPath: destination.path)
+
+        do {
+            if hadExisting {
+                try fm.moveItem(at: destination, to: backup)
+            }
+            try fm.moveItem(at: replacement, to: destination)
+            if hadExisting {
+                try? fm.removeItem(at: backup)
+            }
+        } catch {
+            try? fm.removeItem(at: replacement)
+            if hadExisting, fm.fileExists(atPath: backup.path), !fm.fileExists(atPath: destination.path) {
+                try? fm.moveItem(at: backup, to: destination)
+            }
+            throw InstallError.fileSystem(String(describing: error))
+        }
+    }
+
+    private func createDirectory(at url: URL) throws {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            throw InstallError.fileSystem(String(describing: error))
+        }
+    }
+
+    private static func isChild(_ child: URL, of parent: URL) -> Bool {
+        let childPath = child.standardizedFileURL.path
+        let parentPath = parent.standardizedFileURL.path
+        return childPath.hasPrefix(parentPath + "/")
     }
 }
 

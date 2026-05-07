@@ -51,4 +51,32 @@ final class SceneDirectorTests: XCTestCase {
         XCTAssertEqual(pet?.size.width,  CGFloat(CodexLayout.frameWidth)  * 0.5)
         XCTAssertEqual(pet?.size.height, CGFloat(CodexLayout.frameHeight) * 0.5)
     }
+
+    func test_previewInstalledPet_spawnsPreviewPet() {
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: [:],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+
+        director.previewInstalledPet(pack, duration: 5)
+
+        XCTAssertEqual(director.previewPetCount, 1)
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first
+        XCTAssertEqual(pet?.currentState, .waving)
+        XCTAssertFalse(pet?.balloon.isHidden ?? true)
+    }
+
+    func test_previewInstalledPet_withZeroDurationRemovesPreviewPet() {
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: [:],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+
+        director.previewInstalledPet(pack, duration: 0)
+
+        XCTAssertEqual(director.previewPetCount, 0)
+        XCTAssertTrue(director.scene.children.compactMap { $0 as? PetNode }.isEmpty)
+    }
 }

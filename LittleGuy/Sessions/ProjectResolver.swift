@@ -10,8 +10,9 @@ struct ProjectResolver {
     }
 
     let overrides: [Override]
-    let defaultPetID: String
-    private let availablePetIDs: [String]
+    var defaultPetID: String { defaultPetIDProvider() }
+    private let defaultPetIDProvider: () -> String
+    private let availablePetIDsProvider: () -> [String]
     private let settingsStore: GlobalSettingsStore?
 
     init(overrides: [Override],
@@ -20,8 +21,19 @@ struct ProjectResolver {
          settingsStore: GlobalSettingsStore? = nil)
     {
         self.overrides = overrides
-        self.defaultPetID = defaultPetID
-        self.availablePetIDs = availablePetIDs
+        self.defaultPetIDProvider = { defaultPetID }
+        self.availablePetIDsProvider = { availablePetIDs }
+        self.settingsStore = settingsStore
+    }
+
+    init(overrides: [Override],
+         defaultPetIDProvider: @escaping () -> String,
+         availablePetIDsProvider: @escaping () -> [String],
+         settingsStore: GlobalSettingsStore? = nil)
+    {
+        self.overrides = overrides
+        self.defaultPetIDProvider = defaultPetIDProvider
+        self.availablePetIDsProvider = availablePetIDsProvider
         self.settingsStore = settingsStore
     }
 
@@ -49,11 +61,12 @@ struct ProjectResolver {
     }
 
     private func petID(for projectURL: URL, agent: AgentType) -> String {
-        guard let settingsStore else { return defaultPetID }
+        let fallbackPetID = defaultPetID
+        guard let settingsStore else { return fallbackPetID }
         return settingsStore.petID(for: projectURL,
                                    agent: agent,
-                                   availablePetIDs: availablePetIDs,
-                                   fallbackPetID: defaultPetID)
+                                   availablePetIDs: availablePetIDsProvider(),
+                                   fallbackPetID: fallbackPetID)
     }
 
     private func findGitRoot(start: URL) -> URL? {

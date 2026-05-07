@@ -148,3 +148,85 @@ extension PetLibraryTests {
         XCTAssertEqual(outcome.packs.map { $0.manifest.id }, ["sample-pet"])
     }
 }
+
+extension PetLibraryTests {
+    func test_installPack_fromFolderZipCopiesIntoUserPets() throws {
+        let userPets = tempDir().appendingPathComponent("pets")
+        let zip = try makeZip(from: fixture("valid-pet"), keepParent: true)
+        defer {
+            try? FileManager.default.removeItem(at: userPets.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: zip.deletingLastPathComponent())
+        }
+
+        let pack = try PetLibrary().installPack(fromZip: zip, into: userPets)
+
+        XCTAssertEqual(pack.manifest.id, "sample-pet")
+        XCTAssertEqual(pack.directory, userPets.appendingPathComponent("sample-pet"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: userPets.appendingPathComponent("sample-pet/pet.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: userPets.appendingPathComponent("sample-pet/spritesheet.png").path))
+    }
+
+    func test_installPack_fromRootContentsZipCopiesIntoUserPets() throws {
+        let userPets = tempDir().appendingPathComponent("pets")
+        let zip = try makeZip(from: fixture("valid-pet"), keepParent: false)
+        defer {
+            try? FileManager.default.removeItem(at: userPets.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: zip.deletingLastPathComponent())
+        }
+
+        let pack = try PetLibrary().installPack(fromZip: zip, into: userPets)
+
+        XCTAssertEqual(pack.manifest.id, "sample-pet")
+        XCTAssertEqual(pack.directory, userPets.appendingPathComponent("sample-pet"))
+    }
+
+    func test_installPack_rejectsUnsafeManifestID() throws {
+        let source = makeTempPackDir(id: "escape", displayName: "Escape")
+            .appendingPathComponent("escape")
+        let sourceParent = source.deletingLastPathComponent()
+        let userPets = tempDir().appendingPathComponent("pets")
+        defer {
+            try? FileManager.default.removeItem(at: sourceParent)
+            try? FileManager.default.removeItem(at: userPets.deletingLastPathComponent())
+        }
+
+        let manifest = #"{ "id": "../escape", "displayName": "Escape" }"#
+        try manifest.data(using: .utf8)!.write(to: source.appendingPathComponent("pet.json"))
+        let zip = try makeZip(from: source, keepParent: true)
+        defer { try? FileManager.default.removeItem(at: zip.deletingLastPathComponent()) }
+
+        XCTAssertThrowsError(try PetLibrary().installPack(fromZip: zip, into: userPets)) { error in
+            XCTAssertEqual(error as? PetLibrary.InstallError, .invalidPetID("../escape"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: userPets.appendingPathComponent("escape").path))
+    }
+
+    func test_installPack_rejectsNonZip() {
+        XCTAssertThrowsError(try PetLibrary().installPack(fromZip: fixture("valid-pet/pet.json"),
+                                                          into: tempDir())) { error in
+            guard case .unsupportedFile = error as? PetLibrary.InstallError else {
+                XCTFail("got \(error)")
+                return
+            }
+        }
+    }
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pl-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func makeZip(from source: URL, keepParent: Bool) throws -> URL {
+        let dir = tempDir()
+        let zip = dir.appendingPathComponent("pet.zip")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-c", "-k"] + (keepParent ? ["--keepParent"] : []) + [source.path, zip.path]
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        return zip
+    }
+}

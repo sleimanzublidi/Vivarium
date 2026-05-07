@@ -6,6 +6,9 @@ final class SceneDirector {
     let scene: SKScene
     private let library: PetLibrary
     private var packsByID: [String: PetPack]
+    private var previewNodes: [String: PetNode] = [:]
+    private var previewSlots: [String: Int] = [:]
+    private var previewTokens: [String: UUID] = [:]
 
     /// All known sessions, regardless of visibility.
     private var sessions: [String: Session] = [:]
@@ -82,6 +85,53 @@ final class SceneDirector {
     func slot(for sessionKey: String) -> Int? { slotForSession[sessionKey] }
     /// Current overflow text, if any. Test hook.
     var overflowText: String? { overflowLabel?.text }
+    /// Number of install-preview pets currently rendered. Test hook.
+    var previewPetCount: Int { previewNodes.count }
+
+    func register(pack: PetPack) {
+        packsByID[pack.manifest.id] = pack
+    }
+
+    func previewInstalledPet(_ pack: PetPack, duration: TimeInterval = 5) {
+        register(pack: pack)
+        let packID = pack.manifest.id
+        removePreview(packID: packID)
+        let token = UUID()
+
+        let node = PetNode(sessionKey: "install-preview-\(packID)",
+                           pack: pack,
+                           library: library,
+                           petScale: petScale)
+        let placement = previewPlacement(for: packID)
+        node.position = placement.position
+        node.zPosition = 50
+        scene.addChild(node)
+        previewNodes[packID] = node
+        previewTokens[packID] = token
+        if let slot = placement.slot {
+            previewSlots[packID] = slot
+        }
+
+        node.play(state: .waving)
+        node.balloon.present(header: "New pet installed",
+                             text: "Hello, I'm \(pack.manifest.displayName)!",
+                             petXInScene: node.position.x,
+                             sceneWidth: scene.size.width,
+                             anchorY: node.size.height / 2 + 2,
+                             sticky: true)
+
+        guard duration > 0 else {
+            removePreview(packID: packID)
+            return
+        }
+
+        let wait = SKAction.wait(forDuration: duration)
+        let remove = SKAction.run { [weak self] in
+            guard self?.previewTokens[packID] == token else { return }
+            self?.removePreview(packID: packID)
+        }
+        node.run(SKAction.sequence([wait, remove]))
+    }
 
     // MARK: - Visibility reconciliation
 
@@ -142,6 +192,20 @@ final class SceneDirector {
 
     private func position(forSlot slot: Int) -> CGPoint {
         CGPoint(x: firstSlotX + interSlotSpacing * CGFloat(slot), y: groundY)
+    }
+
+    private func previewPlacement(for packID: String) -> (position: CGPoint, slot: Int?) {
+        let usedSlots = Set(slotForSession.values).union(previewSlots.values)
+        if let slot = (0..<maxVisiblePets).first(where: { !usedSlots.contains($0) }) {
+            return (position(forSlot: slot), slot)
+        }
+        return (CGPoint(x: scene.size.width / 2, y: groundY), nil)
+    }
+
+    private func removePreview(packID: String) {
+        previewNodes.removeValue(forKey: packID)?.removeFromParent()
+        previewSlots.removeValue(forKey: packID)
+        previewTokens.removeValue(forKey: packID)
     }
 
     // MARK: - Balloons

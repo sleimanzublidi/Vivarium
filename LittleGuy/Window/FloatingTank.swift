@@ -6,13 +6,17 @@ import SpriteKit
 final class FloatingTank: NSWindow {
     private static let frameDefaultsKey = "LittleGuyFloatingTankFrame.v2"
     private static let sleepAssertionReason = "LittleGuy floating tank visible" as CFString
-    private let skView: SKView
+    private let skView: PetDropSKView
     private var sleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var sleepAssertionActive = false
     private var hasFinishedInitialRestore = false
+    var onPetZipDropped: (([URL]) -> Void)? {
+        get { skView.onPetZipDropped }
+        set { skView.onPetZipDropped = newValue }
+    }
 
     init(scene: SKScene, contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160)) {
-        let view = SKView(frame: NSRect(origin: .zero, size: contentRect.size))
+        let view = PetDropSKView(frame: NSRect(origin: .zero, size: contentRect.size))
         view.preferredFramesPerSecond = 60
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
@@ -239,5 +243,52 @@ struct ScreenInfo: Equatable {
 private extension NSScreen {
     var displayID: UInt32? {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+    }
+}
+
+final class PetDropSKView: SKView {
+    var onPetZipDropped: (([URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        zipURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        zipURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        !zipURLs(from: sender).isEmpty
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = zipURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+        onPetZipDropped?(urls)
+        return true
+    }
+
+    private func zipURLs(from draggingInfo: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        let objects = draggingInfo.draggingPasteboard
+            .readObjects(forClasses: [NSURL.self], options: options) ?? []
+        let urls = objects.compactMap { object -> URL? in
+            if let url = object as? URL { return url }
+            if let url = object as? NSURL { return url as URL }
+            return nil
+        }
+        return urls.filter { $0.pathExtension.lowercased() == "zip" }
     }
 }
