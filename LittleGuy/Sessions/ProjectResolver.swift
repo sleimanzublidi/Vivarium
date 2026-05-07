@@ -11,8 +11,21 @@ struct ProjectResolver {
 
     let overrides: [Override]
     let defaultPetID: String
+    private let availablePetIDs: [String]
+    private let settingsStore: GlobalSettingsStore?
 
-    func resolve(cwd: URL) -> ProjectIdentity {
+    init(overrides: [Override],
+         defaultPetID: String,
+         availablePetIDs: [String] = [],
+         settingsStore: GlobalSettingsStore? = nil)
+    {
+        self.overrides = overrides
+        self.defaultPetID = defaultPetID
+        self.availablePetIDs = availablePetIDs
+        self.settingsStore = settingsStore
+    }
+
+    func resolve(cwd: URL, agent: AgentType) -> ProjectIdentity {
         // 1. override match wins
         if let o = overrides.first(where: { o in
             fnmatch_strict(pattern: o.matchGlob, path: cwd.path)
@@ -25,12 +38,22 @@ struct ProjectResolver {
             return ProjectIdentity(
                 url: root,
                 label: root.lastPathComponent,
-                petId: defaultPetID
+                petId: petID(for: root, agent: agent)
             )
         }
 
         // 3. cwd
-        return ProjectIdentity(url: cwd, label: cwd.lastPathComponent, petId: defaultPetID)
+        return ProjectIdentity(url: cwd,
+                               label: cwd.lastPathComponent,
+                               petId: petID(for: cwd, agent: agent))
+    }
+
+    private func petID(for projectURL: URL, agent: AgentType) -> String {
+        guard let settingsStore else { return defaultPetID }
+        return settingsStore.petID(for: projectURL,
+                                   agent: agent,
+                                   availablePetIDs: availablePetIDs,
+                                   fallbackPetID: defaultPetID)
     }
 
     private func findGitRoot(start: URL) -> URL? {
@@ -45,6 +68,125 @@ struct ProjectResolver {
             dir = parent
         }
         return nil
+    }
+}
+
+final class GlobalSettingsStore {
+    typealias PetChooser = ([String]) -> String?
+
+    struct Settings: Codable, Equatable {
+        var version: Int
+        var projectPets: [String: String]
+
+        init(version: Int = 1, projectPets: [String: String] = [:]) {
+            self.version = version
+            self.projectPets = projectPets
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+            projectPets = try container.decodeIfPresent([String: String].self, forKey: .projectPets) ?? [:]
+        }
+    }
+
+    static let defaultSettingsURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".littleguy/settings.json")
+
+    private let settingsURL: URL
+    private let fileManager: FileManager
+    private let choosePetID: PetChooser
+    private let lock = NSLock()
+
+    init(settingsURL: URL = GlobalSettingsStore.defaultSettingsURL,
+         fileManager: FileManager = .default,
+         choosePetID: @escaping PetChooser = { $0.randomElement() })
+    {
+        self.settingsURL = settingsURL
+        self.fileManager = fileManager
+        self.choosePetID = choosePetID
+    }
+
+    func petID(for projectURL: URL,
+               agent: AgentType,
+               availablePetIDs: [String],
+               fallbackPetID: String) -> String
+    {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let available = Self.uniquePetIDs(availablePetIDs)
+        guard !available.isEmpty else { return fallbackPetID }
+
+        let key = Self.projectAgentKey(for: projectURL, agent: agent)
+        var settings = loadSettings()
+        if let saved = settings.projectPets[key], available.contains(saved) {
+            return saved
+        }
+
+        let selected = chooseAvailablePetID(from: candidatePetIDs(in: settings, availablePetIDs: available))
+        settings.projectPets[key] = selected
+        saveSettings(settings)
+        return selected
+    }
+
+    static func projectKey(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    static func projectAgentKey(for url: URL, agent: AgentType) -> String {
+        "\(agent.rawValue)::\(projectKey(for: url))"
+    }
+
+    private static func uniquePetIDs(_ petIDs: [String]) -> [String] {
+        var seen = Set<String>()
+        return petIDs.filter { seen.insert($0).inserted }
+    }
+
+    private func candidatePetIDs(in settings: Settings, availablePetIDs: [String]) -> [String] {
+        let assigned = Set(settings.projectPets
+            .filter { Self.isProjectAgentKey($0.key) }
+            .values)
+            .intersection(availablePetIDs)
+        let unassigned = availablePetIDs.filter { !assigned.contains($0) }
+        return unassigned.isEmpty ? availablePetIDs : unassigned
+    }
+
+    private static func isProjectAgentKey(_ key: String) -> Bool {
+        key.hasPrefix("\(AgentType.claudeCode.rawValue)::")
+            || key.hasPrefix("\(AgentType.copilotCli.rawValue)::")
+    }
+
+    private func chooseAvailablePetID(from availablePetIDs: [String]) -> String {
+        if let selected = choosePetID(availablePetIDs), availablePetIDs.contains(selected) {
+            return selected
+        }
+        NSLog("[WARNING] Pet chooser returned no available pet; using \(availablePetIDs[0])")
+        return availablePetIDs[0]
+    }
+
+    private func loadSettings() -> Settings {
+        guard fileManager.fileExists(atPath: settingsURL.path) else { return Settings() }
+        do {
+            let data = try Data(contentsOf: settingsURL)
+            return try JSONDecoder().decode(Settings.self, from: data)
+        } catch {
+            NSLog("[ERROR] Failed to read LittleGuy settings at \(settingsURL.path): \(error)")
+            return Settings()
+        }
+    }
+
+    private func saveSettings(_ settings: Settings) {
+        do {
+            try fileManager.createDirectory(at: settingsURL.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(settings)
+            try data.write(to: settingsURL, options: [.atomic])
+        } catch {
+            NSLog("[ERROR] Failed to write LittleGuy settings at \(settingsURL.path): \(error)")
+        }
     }
 }
 

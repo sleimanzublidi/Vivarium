@@ -53,7 +53,7 @@ actor SessionStore {
     func apply(_ event: AgentEvent) {
         switch event.kind {
         case .sessionStart:
-            let project = resolver.resolve(cwd: event.cwd)
+            let project = resolver.resolve(cwd: event.cwd, agent: event.agent)
             let s = Session(agent: event.agent,
                             sessionKey: event.sessionKey,
                             project: project,
@@ -76,7 +76,7 @@ actor SessionStore {
                 s = existing
                 isNew = false
             } else {
-                let project = resolver.resolve(cwd: event.cwd)
+                let project = resolver.resolve(cwd: event.cwd, agent: event.agent)
                 s = Session(agent: event.agent,
                             sessionKey: event.sessionKey,
                             project: project,

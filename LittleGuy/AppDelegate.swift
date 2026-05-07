@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".littleguy/sock")
     }()
+    private let settingsURL: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".littleguy/settings.json")
+    }()
     private let userPetsDir: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".littleguy/pets")
@@ -28,8 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let outcome = library.discoverAll(userPetsDir: userPetsDir)
         let packs = Dictionary(uniqueKeysWithValues: outcome.packs.map { ($0.manifest.id, $0) })
 
-        let defaultID = outcome.packs.first?.manifest.id ?? "sample-pet"
-        let resolver = ProjectResolver(overrides: [], defaultPetID: defaultID)
+        let petIds = outcome.packs.map(\.manifest.id)
+        let defaultID = outcome.packs.randomElement()?.manifest.id ?? "sample-pet"
+
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: defaultID,
+                                       availablePetIDs: petIds,
+                                       settingsStore: GlobalSettingsStore(settingsURL: settingsURL))
         store = SessionStore(resolver: resolver, idleTimeout: 600)
 
         director = SceneDirector(library: library,
