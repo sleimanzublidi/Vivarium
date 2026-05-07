@@ -20,7 +20,7 @@ Three transforms:
 
 ## Stage 1 — Hook payload → `AgentEventKind`
 
-The agent CLIs post one JSON line per hook to `~/.littleguy/sock`. Each line carries an `agent` field; `EventNormalizer` (`Adapters/EventAdapter.swift:27`) uses that to dispatch to the right adapter. Each adapter is a pure transform from raw JSON to a unified `AgentEventKind`.
+The agent CLIs post one JSON line per hook to `~/.vivarium/sock`. Each line carries an `agent` field; `EventNormalizer` (`Adapters/EventAdapter.swift:27`) uses that to dispatch to the right adapter. Each adapter is a pure transform from raw JSON to a unified `AgentEventKind`.
 
 ### Claude Code (`Adapters/ClaudeCodeAdapter.swift:32`)
 

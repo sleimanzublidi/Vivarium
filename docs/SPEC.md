@@ -1,4 +1,4 @@
-# LittleGuy — Design
+# Vivarium — Design
 
 A macOS desktop pet companion for Claude Code and GitHub Copilot CLI. Inspired by [Clawd Tank](https://github.com/marciogranzotto/clawd-tank), reimplemented in Swift + SpriteKit, using the [OpenPets](https://github.com/alvinunreal/openpets) pet pack format.
 
@@ -10,7 +10,7 @@ A macOS desktop pet companion for Claude Code and GitHub Copilot CLI. Inspired b
 
 ## 1. Overview
 
-LittleGuy displays a small floating window ("the box") containing one animated pet per active coding-agent session. Pets animate based on what their session is doing (running a tool, waiting for input, erroring out) and show speech-balloon messages when relevant. Pets are configurable per project and use the OpenPets pack format, which is open and well-defined.
+Vivarium displays a small floating window ("the box") containing one animated pet per active coding-agent session. Pets animate based on what their session is doing (running a tool, waiting for input, erroring out) and show speech-balloon messages when relevant. Pets are configurable per project and use the OpenPets pack format, which is open and well-defined.
 
 A menu bar icon provides controls (show/hide window, install hooks, manage pets and project mappings, settings).
 
@@ -37,7 +37,7 @@ Single-process Swift macOS application. Hooks fire from the agent CLI, execute a
 
 ```
 Claude Code (~/.claude/settings.json hooks)        ─┐
-                                                     ├─► ~/.littleguy/notify ─► UNIX socket ─► LittleGuy.app
+                                                     ├─► ~/.vivarium/notify ─► UNIX socket ─► Vivarium.app
 Copilot CLI (.github/hooks/copilot-cli-policy.json) ─┘                                          │
                                                                                                 ├─ SocketServer
                                                                                                 ├─ EventNormalizer (ClaudeCodeAdapter, CopilotCLIAdapter)
@@ -48,7 +48,7 @@ Copilot CLI (.github/hooks/copilot-cli-policy.json) ─┘                      
                                                                                                 └─ MenuBarItem (NSStatusItem)
 ```
 
-The notify helper is a small standalone Swift binary built as a universal binary (arm64 + x86_64). It reads stdin, augments the JSON with `agent` type and `pid`/`ppid`, writes one NDJSON line to `~/.littleguy/sock`, and exits. It must never block the agent — hard 200 ms timeouts on connect and write, drop on failure, exit `0` always.
+The notify helper is a small standalone Swift binary built as a universal binary (arm64 + x86_64). It reads stdin, augments the JSON with `agent` type and `pid`/`ppid`, writes one NDJSON line to `~/.vivarium/sock`, and exits. It must never block the agent — hard 200 ms timeouts on connect and write, drop on failure, exit `0` always.
 
 ## 4. Agent hook integration
 
@@ -106,7 +106,7 @@ Adapters are pure functions: `(rawJSON, agentType) -> AgentEvent?`. Returning `n
 
 ## 6. Sessions and project resolution
 
-`SessionStore` is a Swift actor. Internal state: `[SessionKey: Session]`. Persisted to `~/.littleguy/sessions.json`, debounced to ≤1 write/sec, plus a flush on `applicationWillTerminate`.
+`SessionStore` is a Swift actor. Internal state: `[SessionKey: Session]`. Persisted to `~/.vivarium/sessions.json`, debounced to ≤1 write/sec, plus a flush on `applicationWillTerminate`.
 
 ```swift
 struct Session {
@@ -128,7 +128,7 @@ struct ProjectIdentity: Hashable {
 
 **Project resolution algorithm (D from brainstorming):**
 1. Walk up from `cwd` looking for a `.git/` directory. Call the result `gitRoot` (or `nil`).
-2. Read `~/.littleguy/projects.json`. If any entry's `match` (a path glob) matches `cwd`, use its `projectURL` and `petId` directly — overrides win.
+2. Read `~/.vivarium/projects.json`. If any entry's `match` (a path glob) matches `cwd`, use its `projectURL` and `petId` directly — overrides win.
 3. Otherwise, `projectURL = gitRoot ?? cwd`. Look up `petId` in the project mapping by exact `projectURL` match. If unmapped, use the user's default pet (settable in menu bar).
 
 `projects.json` shape:
@@ -152,7 +152,7 @@ struct ProjectIdentity: Hashable {
 
 **Pack layout (unchanged from upstream):**
 ```
-~/.littleguy/pets/<id>/
+~/.vivarium/pets/<id>/
 ├── pet.json          # { id, displayName, description, spritesheetPath? }
 └── spritesheet.png   # or spritesheet.webp
 ```
@@ -182,7 +182,7 @@ struct ProjectIdentity: Hashable {
 - Decoded image dimensions equal 1536 × 1872 (±1 px tolerance for resampling artifacts).
 - `id` is unique within the library; collisions reject the second one loaded.
 
-**Live reload:** `DispatchSource.makeFileSystemObjectSource` watches `~/.littleguy/pets/`. Adding/removing/replacing a pack causes a re-scan; existing sessions whose pet remains valid are unaffected.
+**Live reload:** `DispatchSource.makeFileSystemObjectSource` watches `~/.vivarium/pets/`. Adding/removing/replacing a pack causes a re-scan; existing sessions whose pet remains valid are unaffected.
 
 **Bundled defaults:** at minimum a sample pet (PNG-only to avoid WebP decode dependency) shipped under `Resources/Pets/`. Used as the fallback when a project has no mapping and the user hasn't picked a default.
 
@@ -243,7 +243,7 @@ struct ProjectIdentity: Hashable {
 ## 11. On-disk layout
 
 ```
-~/.littleguy/
+~/.vivarium/
 ├── sock                # Unix domain socket
 ├── notify              # installed helper binary (the agent runs this)
 ├── notify.log          # rotating, 1 MB cap

@@ -1,0 +1,126 @@
+name: Vivarium
+options:
+  bundleIdPrefix: com.sleimanzublidi.vivarium
+  deploymentTarget:
+    macOS: "13.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    ARCHS: "$(ARCHS_STANDARD)"
+    ONLY_ACTIVE_ARCH: NO
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+targets:
+
+  Vivarium:
+    type: application
+    platform: macOS
+    sources:
+      - path: Vivarium
+        excludes:
+          - "Resources/Pets"
+          - "Resources/AppIcons/AppIcon*.png"
+      - path: Vivarium/Resources/Pets
+        type: folder
+    info:
+      path: Vivarium/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleDisplayName: Vivarium
+        CFBundleIconFile: AppIcon
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sleimanzublidi.vivarium.App
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+
+  VivariumNotify:
+    type: tool
+    platform: macOS
+    sources:
+      - VivariumNotify
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sleimanzublidi.vivarium.Notify
+
+  VivariumTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: VivariumTests
+        excludes:
+          - "Fixtures"
+      - path: VivariumTests/Fixtures
+        type: folder
+    dependencies:
+      - target: Vivarium
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Vivarium.app/Contents/MacOS/Vivarium"
+
+# Defining `schemes:` disables xcodegen's per-target auto-gen, so all
+# schemes we want must be listed here explicitly. The "Debug Grid" variant
+# launches the app with `VIVARIUM_DEBUG_GRID=1` so the floating tank
+# renders every PetState in a grid for visual validation.
+schemes:
+  Vivarium:
+    build:
+      targets:
+        Vivarium: all
+        VivariumTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - VivariumTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  Vivarium (Debug Grid):
+    build:
+      targets:
+        Vivarium: all
+        VivariumTests: [test]
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: VIVARIUM_DEBUG_GRID
+          value: "1"
+          isEnabled: true
+    test:
+      config: Debug
+      targets:
+        - VivariumTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  VivariumNotify:
+    build:
+      targets:
+        VivariumNotify: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
