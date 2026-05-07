@@ -21,7 +21,7 @@ actor SessionStore {
     ///     hook can be missed when a session predates the install.
     init(resolver: ProjectResolver,
          idleTimeout: TimeInterval,
-         agentIdleTimeout: TimeInterval = 60,
+         agentIdleTimeout: TimeInterval = 30,
          now: @escaping @Sendable () -> Date = { Date() })
     {
         self.resolver = resolver

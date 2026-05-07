@@ -44,5 +44,8 @@ enum ToolDisplayName {
         "create":          "Creating",
         "str_replace":     "Editing",
         "fetch":           "Fetching",
+        "apply_patch":     "Patching",
+        "rg":              "Searching",
+        "report_intent":   "Understanding",
     ]
 }
