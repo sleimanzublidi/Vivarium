@@ -52,6 +52,49 @@ final class SceneDirectorTests: XCTestCase {
         XCTAssertEqual(pet?.size.height, CGFloat(CodexLayout.frameHeight) * 0.5)
     }
 
+    func test_firstPet_isCenteredInScene() {
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let session = Session(agent: .claudeCode, sessionKey: "k1",
+                              project: project, startedAt: Date())
+
+        director.addOrUpdate(session: session)
+
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        XCTAssertEqual(pet.layoutTargetPosition.x, 300, accuracy: 0.001)
+    }
+
+    func test_secondPet_recentersRowAndMovesFirstPetLeft() {
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let t = Date()
+        let first = Session(agent: .claudeCode, sessionKey: "k1",
+                            project: project, startedAt: t)
+        let second = Session(agent: .claudeCode, sessionKey: "k2",
+                             project: project, startedAt: t.addingTimeInterval(1))
+
+        director.addOrUpdate(session: first)
+        director.addOrUpdate(session: second)
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let firstPet = pets.first { $0.sessionKey == "k1" }!
+        let secondPet = pets.first { $0.sessionKey == "k2" }!
+        XCTAssertEqual(firstPet.layoutTargetPosition.x, 196, accuracy: 0.001)
+        XCTAssertEqual(secondPet.layoutTargetPosition.x, 404, accuracy: 0.001)
+        XCTAssertEqual(firstPet.currentState, .runningLeft)
+        XCTAssertEqual(firstPet.hasLayoutMovement, true)
+    }
+
     func test_previewInstalledPet_spawnsPreviewPet() {
         let pack = validPack()
         let director = SceneDirector(library: PetLibrary(),

@@ -306,20 +306,9 @@ struct ProjectIdentity: Hashable {
 - Visual snapshot tests of the SKScene — high maintenance, low signal for pixel-art animation.
 - CI-driven tests against real `claude` / `copilot` binaries — flaky and account-bound. Adapter golden files cover the contract.
 
-## 14. Open questions / future work
+## References
 
-- **Click-through-on-hover** to make the window unobtrusive when typing under it.
-- **Multi-monitor follow** — should the window stick to a specific display or follow the active screen?
-- **Remote pet registry** — fetch packs by URL or from a curated index.
-- **Background scenes pack** — bundled set of artistic backgrounds matching the openpets aesthetic.
-- **Per-pet variations within a project** — e.g., session 1 = Slayer, session 2 = Wizard, even on the same project.
-- **Copilot in VS Code** — would require a VS Code extension; same socket protocol, new adapter.
-
-## 15. References
-
-- Clawd Tank: https://github.com/marciogranzotto/clawd-tank
 - OpenPets: https://github.com/alvinunreal/openpets
-- OpenPets Codex spritesheet constants: https://github.com/alvinunreal/openpets/blob/main/packages/core/src/codex-mapping.ts
 - Claude Code hooks: https://docs.anthropic.com/en/docs/claude-code/hooks
 - Copilot CLI hooks tutorial: https://docs.github.com/en/copilot/tutorials/copilot-cli-hooks
 - Copilot CLI hooks reference: https://docs.github.com/en/copilot/reference/hooks-configuration

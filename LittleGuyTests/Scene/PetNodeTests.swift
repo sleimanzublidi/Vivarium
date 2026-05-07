@@ -42,4 +42,21 @@ final class PetNodeTests: XCTestCase {
                        "spawn greeting should start the pet on the waving row")
         XCTAssertNotNil(node.action(forKey: "stateAnimation"))
     }
+
+    func test_moveToLayoutPosition_usesDirectionalRunningAnimation() throws {
+        let library = PetLibrary()
+        let url = Bundle(for: type(of: self)).url(forResource: "Fixtures", withExtension: nil)!
+            .appendingPathComponent("valid-pet")
+        guard case .ok(let pack) = library.loadPack(at: url) else {
+            XCTFail("could not load valid-pet"); return
+        }
+        let node = PetNode(sessionKey: "k1", pack: pack, library: library)
+        node.position = CGPoint(x: 100, y: 10)
+
+        node.moveToLayoutPosition(CGPoint(x: 50, y: 10), steadyState: .waiting)
+
+        XCTAssertEqual(node.layoutTargetPosition.x, 50, accuracy: 0.001)
+        XCTAssertEqual(node.currentState, .runningLeft)
+        XCTAssertTrue(node.hasLayoutMovement)
+    }
 }

@@ -42,6 +42,37 @@ final class BalloonNodeTests: XCTestCase {
         XCTAssertTrue(balloon.isHidden)
     }
 
+    /// `lastBubbleRect` is the contract SceneDirector reads to compute
+    /// scene-space overlap between balloons on different pets. It must be
+    /// populated after `present` and cleared by `dismiss` so a hidden
+    /// balloon never participates in stagger layout.
+    func test_present_setsLastBubbleRect_dismissClearsIt() {
+        let balloon = BalloonNode()
+        XCTAssertNil(balloon.lastBubbleRect)
+        balloon.present(header: "Project", text: "hi",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 50, ttl: 5, sticky: true)
+        XCTAssertNotNil(balloon.lastBubbleRect)
+        balloon.dismiss()
+        XCTAssertNil(balloon.lastBubbleRect)
+    }
+
+    /// `setStackLayout` is invoked by SceneDirector to dim and z-order a
+    /// balloon as a newer one becomes the foreground conversation. It must
+    /// apply the shift directly to `position.y` and record
+    /// `targetStackAlpha` (used by tests since the live `alpha` is
+    /// animated by an SKAction that doesn't tick without an SKView).
+    func test_setStackLayout_appliesPositionAndTargetAlpha() {
+        let balloon = BalloonNode()
+        balloon.present(header: "Project", text: "hi",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 50, ttl: 5, sticky: true)
+        balloon.setStackLayout(verticalShift: 42, targetAlpha: 0.55, zPosition: 105)
+        XCTAssertEqual(balloon.position.y, 42, accuracy: 0.001)
+        XCTAssertEqual(balloon.zPosition, 105, accuracy: 0.001)
+        XCTAssertEqual(balloon.targetStackAlpha, 0.55, accuracy: 0.001)
+    }
+
     func test_cloudPath_coversInputRect() {
         // The cloud body's bounding box must cover the requested rect so
         // text laid out at the same coordinates stays inside the puffy
@@ -53,6 +84,46 @@ final class BalloonNodeTests: XCTestCase {
         XCTAssertLessThanOrEqual(bbox.minY, rect.minY + 0.5)
         XCTAssertGreaterThanOrEqual(bbox.maxX, rect.maxX - 0.5)
         XCTAssertGreaterThanOrEqual(bbox.maxY, rect.maxY - 0.5)
+    }
+
+    /// The combined bubble+tail path must cover the full bubble rect AND
+    /// dip down to the tail apex — that's how we know the tail is part of
+    /// the same continuous outline (which is what eliminates the seam at
+    /// the join between bubble bottom and tail base).
+    func test_speechBubblePath_extendsFromBubbleTopToTailApex() {
+        let rect = CGRect(x: -100, y: 50, width: 200, height: 30)
+        let apex = CGPoint(x: 0, y: 40)
+        let path = BalloonNode.speechBubblePath(
+            bubbleRect: rect,
+            cornerRadius: 6,
+            tailBaseLeftX: -4,
+            tailBaseRightX: 4,
+            tailApex: apex)
+        let bbox = path.boundingBoxOfPath
+        XCTAssertEqual(bbox.minY, apex.y, accuracy: 0.5,
+                       "bbox should drop to the tail apex")
+        XCTAssertEqual(bbox.maxY, rect.maxY, accuracy: 0.5,
+                       "bbox should reach the bubble top")
+        XCTAssertLessThanOrEqual(bbox.minX, rect.minX + 0.5)
+        XCTAssertGreaterThanOrEqual(bbox.maxX, rect.maxX - 0.5)
+    }
+
+    /// Sanity check: the apex point itself lies on the path. Without this,
+    /// a bug that drops the tail would still pass `boundingBox`-based tests
+    /// (the bubble alone may already span the apex's y when corners are
+    /// generous).
+    func test_speechBubblePath_containsTailApex() {
+        let rect = CGRect(x: -100, y: 50, width: 200, height: 30)
+        let apex = CGPoint(x: 0, y: 40)
+        let path = BalloonNode.speechBubblePath(
+            bubbleRect: rect, cornerRadius: 6,
+            tailBaseLeftX: -4, tailBaseRightX: 4, tailApex: apex)
+        // Stroke the path with a small line width and check the apex is
+        // covered. CGPath has no point-on-path query, so test by stroking
+        // and using contains() on the resulting filled-stroke path.
+        let stroked = path.copy(strokingWithWidth: 1.5,
+                                lineCap: .round, lineJoin: .miter, miterLimit: 10)
+        XCTAssertTrue(stroked.contains(apex))
     }
 
     func test_thoughtTailPath_isEmptyWhenNoSpan() {
@@ -264,7 +335,12 @@ final class SceneDirectorBalloonTests: XCTestCase {
         XCTAssertFalse(pet.balloon.isHidden)
     }
 
-    func test_newBalloonOnOnePet_dismissesOtherPetsBalloons() {
+    /// With pets spaced apart enough that their balloons don't overlap
+    /// horizontally, both balloons stay visible at their natural positions
+    /// (no stagger shift). The older one is still dimmed though — dimming
+    /// is unconditional on age so the most-recent conversation is always
+    /// visually dominant, even when balloons sit side-by-side.
+    func test_newBalloonOnOnePet_keepsBothVisibleAndDimsOlder() {
         let director = makeDirector()
         let t0 = Date()
         director.addOrUpdate(session: makeSession(
@@ -276,8 +352,17 @@ final class SceneDirectorBalloonTests: XCTestCase {
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
         let petB = pets.first { $0.sessionKey == "b" }!
-        XCTAssertTrue(petA.balloon.isHidden, "earlier pet's balloon should be dismissed")
-        XCTAssertFalse(petB.balloon.isHidden, "newest pet's balloon should be visible")
+        XCTAssertFalse(petA.balloon.isHidden,
+                       "older pet's balloon should remain visible")
+        XCTAssertFalse(petB.balloon.isHidden,
+                       "newest pet's balloon should be visible")
+        XCTAssertEqual(petA.balloon.position.y, 0, accuracy: 0.001,
+                       "no overlap → no stagger shift on the older balloon")
+        XCTAssertEqual(petA.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "older balloons dim regardless of overlap")
+        XCTAssertEqual(petB.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "newest balloon stays at full alpha")
     }
 
     /// Sticky balloons (waiting/failed) hold no auto-dismiss timer — they
@@ -344,6 +429,126 @@ final class SceneDirectorBalloonTests: XCTestCase {
     }
 }
 
+/// Cross-pet balloon ordering: the director leaves overlapping balloons
+/// on screen instead of dismissing siblings; older balloons stay at their
+/// natural position (no vertical shift — that risks pushing them off the
+/// top of the tank) and recede via dim + lower z so the most-recent one
+/// stays prominent in front.
+final class SceneDirectorBalloonStaggerTests: XCTestCase {
+    private func validPack() -> PetPack {
+        let url = Bundle(for: type(of: self)).url(forResource: "Fixtures", withExtension: nil)!
+            .appendingPathComponent("valid-pet")
+        guard case .ok(let p) = PetLibrary().loadPack(at: url) else { fatalError() }
+        return p
+    }
+
+    private func makeDirector(petScale: CGFloat = 0.5) -> SceneDirector {
+        SceneDirector(library: PetLibrary(),
+                      packsByID: ["sample-pet": validPack()],
+                      sceneSize: CGSize(width: 600, height: 200),
+                      petScale: petScale)
+    }
+
+    private func makeSession(key: String,
+                             state: PetState = .running,
+                             at: Date,
+                             text: String) -> Session {
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        var s = Session(agent: .claudeCode, sessionKey: key,
+                        project: project, startedAt: at)
+        s.state = state
+        s.lastEventAt = at
+        s.lastBalloon = BalloonText(text: text, postedAt: at)
+        return s
+    }
+
+    /// Two pets, both with balloons: both stay at their natural Y; only
+    /// alpha and z differentiate them.
+    func test_twoBalloons_neitherShifts_olderDimmedAndBelow() {
+        let director = makeDirector(petScale: 0.5)
+        let t = Date()
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        director.addOrUpdate(session: makeSession(
+            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let petA = pets.first { $0.sessionKey == "a" }!
+        let petB = pets.first { $0.sessionKey == "b" }!
+
+        XCTAssertFalse(petA.balloon.isHidden, "older balloon stays visible")
+        XCTAssertFalse(petB.balloon.isHidden)
+        XCTAssertEqual(petA.balloon.position.y, 0, accuracy: 0.001,
+                       "older balloon stays at natural anchor — no vertical shift")
+        XCTAssertEqual(petB.balloon.position.y, 0, accuracy: 0.001)
+        XCTAssertEqual(petB.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "newest renders at full alpha")
+        XCTAssertEqual(petA.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "older balloon recedes via dim")
+        XCTAssertGreaterThan(petB.balloon.zPosition, petA.balloon.zPosition,
+                             "newest paints in front of older balloons")
+    }
+
+    /// Three balloons: every older one dims; their z-order matches age
+    /// (newest highest). No vertical shift on any of them.
+    func test_threeBalloons_zOrderMatchesAge() {
+        let director = makeDirector(petScale: 0.5)
+        let t = Date()
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        director.addOrUpdate(session: makeSession(
+            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+        director.addOrUpdate(session: makeSession(
+            key: "c", at: t.addingTimeInterval(2), text: "gamma"))
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let petA = pets.first { $0.sessionKey == "a" }!
+        let petB = pets.first { $0.sessionKey == "b" }!
+        let petC = pets.first { $0.sessionKey == "c" }!
+
+        XCTAssertEqual(petA.balloon.position.y, 0, accuracy: 0.001)
+        XCTAssertEqual(petB.balloon.position.y, 0, accuracy: 0.001)
+        XCTAssertEqual(petC.balloon.position.y, 0, accuracy: 0.001)
+        XCTAssertEqual(petC.balloon.targetStackAlpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(petB.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001)
+        XCTAssertEqual(petA.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001)
+        XCTAssertGreaterThan(petC.balloon.zPosition, petB.balloon.zPosition)
+        XCTAssertGreaterThan(petB.balloon.zPosition, petA.balloon.zPosition,
+                             "older balloons step further down in z")
+    }
+
+    /// When the newest pet's state goes idle (its balloon dismisses), the
+    /// older balloon becomes the new "newest" and should regain full alpha.
+    func test_dismissingNewest_undimsOlderBalloon() {
+        let director = makeDirector(petScale: 0.5)
+        let t = Date()
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        director.addOrUpdate(session: makeSession(
+            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let petA = pets.first { $0.sessionKey == "a" }!
+
+        XCTAssertEqual(petA.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "precondition: A is dimmed while B is the newest")
+
+        // B leaves running → idle. Its balloon dismisses; A becomes the
+        // sole visible balloon and should regain full alpha.
+        var bIdle = makeSession(key: "b",
+                                state: .idle,
+                                at: t.addingTimeInterval(2),
+                                text: "beta")
+        bIdle.lastBalloon = BalloonText(text: "beta", postedAt: t.addingTimeInterval(1))
+        director.addOrUpdate(session: bIdle)
+
+        XCTAssertEqual(petA.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "A should return to full alpha when it's alone")
+    }
+}
+
 final class SceneDirectorSlotTests: XCTestCase {
     private func validPack() -> PetPack {
         let url = Bundle(for: type(of: self)).url(forResource: "Fixtures", withExtension: nil)!
@@ -405,8 +610,8 @@ final class SceneDirectorSlotTests: XCTestCase {
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
         let petB = pets.first { $0.sessionKey == "b" }!
-        let aRight = petA.position.x + petA.size.width / 2
-        let bLeft  = petB.position.x - petB.size.width / 2
+        let aRight = petA.layoutTargetPosition.x + petA.size.width / 2
+        let bLeft  = petB.layoutTargetPosition.x - petB.size.width / 2
         XCTAssertLessThanOrEqual(aRight, bLeft + 0.001,
                                  "pet A's right edge should not cross pet B's left edge")
         XCTAssertGreaterThan(bLeft - aRight, 0,

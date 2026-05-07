@@ -32,7 +32,13 @@ final class BalloonNode: SKNode {
 
     private static let bodyFontSize: CGFloat = 11
     private static let headerFontSize: CGFloat = 9
-    private static let dismissActionKey = "balloonDismiss"
+    /// Fade in/out animations. Stack-layout adjustments reuse this key to
+    /// supersede an in-flight fade with a fade to the new target alpha.
+    private static let fadeActionKey = "balloonFade"
+    /// Auto-dismiss timer (non-sticky only): wait → fadeOut → hide. Held on
+    /// its own key so a stack-layout fade doesn't accidentally cancel it.
+    private static let autoDismissActionKey = "balloonAutoDismiss"
+    static let defaultZPosition: CGFloat = 100
 
     private let cloudOutline = SKShapeNode()
     private let background = SKShapeNode()
@@ -40,6 +46,17 @@ final class BalloonNode: SKNode {
     private let header: SKLabelNode
     private let body: SKLabelNode
     private var style: Style = .speech
+
+    /// The bubble rect from the most recent `present(...)` call, in
+    /// balloon-local coordinates. `nil` while hidden. SceneDirector reads
+    /// this to detect cross-pet balloon overlap and stagger them.
+    private(set) var lastBubbleRect: CGRect?
+
+    /// Final alpha that the most recent `setStackLayout` (or `present`)
+    /// fades toward. SKActions don't tick without an SKView running, so the
+    /// live `alpha` lags the target in unit tests; this property lets tests
+    /// assert the intended dim level deterministically.
+    private(set) var targetStackAlpha: CGFloat = 1.0
 
     override init() {
         let header = SKLabelNode(fontNamed: Self.roundedFontName(size: Self.headerFontSize, weight: .bold))
@@ -86,7 +103,7 @@ final class BalloonNode: SKNode {
         addChild(header)
         addChild(body)
 
-        zPosition = 100
+        zPosition = Self.defaultZPosition
         isHidden = true
     }
 
@@ -125,26 +142,56 @@ final class BalloonNode: SKNode {
             sceneWidth: sceneWidth,
             anchorY: anchorY)
         apply(geom)
+        lastBubbleRect = geom.bubbleRect
 
-        removeAction(forKey: Self.dismissActionKey)
+        removeAction(forKey: Self.fadeActionKey)
+        removeAction(forKey: Self.autoDismissActionKey)
         isHidden = false
         alpha = 0
-        let fadeIn = SKAction.fadeIn(withDuration: 0.15)
-        if sticky {
-            run(fadeIn, withKey: Self.dismissActionKey)
-        } else {
+        // Reset any stagger state from a previous round so re-presented
+        // balloons start at their natural position; SceneDirector's restack
+        // pass re-applies a shift if neighbours overlap.
+        position = .zero
+        zPosition = Self.defaultZPosition
+        targetStackAlpha = 1.0
+        let fadeIn = SKAction.fadeAlpha(to: 1.0, duration: 0.15)
+        run(fadeIn, withKey: Self.fadeActionKey)
+        if !sticky {
             let wait = SKAction.wait(forDuration: ttl)
             let fadeOut = SKAction.fadeOut(withDuration: 0.25)
-            let hide = SKAction.run { [weak self] in self?.isHidden = true }
-            run(SKAction.sequence([fadeIn, wait, fadeOut, hide]),
-                withKey: Self.dismissActionKey)
+            let hide = SKAction.run { [weak self] in
+                self?.isHidden = true
+                self?.lastBubbleRect = nil
+            }
+            run(SKAction.sequence([wait, fadeOut, hide]),
+                withKey: Self.autoDismissActionKey)
         }
     }
 
     /// Tear down any in-flight animation and hide.
     func dismiss() {
-        removeAction(forKey: Self.dismissActionKey)
+        removeAction(forKey: Self.fadeActionKey)
+        removeAction(forKey: Self.autoDismissActionKey)
         isHidden = true
+        lastBubbleRect = nil
+        position = .zero
+        zPosition = Self.defaultZPosition
+        targetStackAlpha = 1.0
+    }
+
+    /// Apply a stagger layout decided by `SceneDirector`. `verticalShift`
+    /// translates the balloon up by that many points (use 0 for natural
+    /// position); `targetAlpha` is the alpha we should fade to so older
+    /// balloons recede behind newer ones; `zPosition` orders the stack so
+    /// the most-recent balloon paints in front. Doesn't disturb the
+    /// auto-dismiss timer for non-sticky balloons.
+    func setStackLayout(verticalShift: CGFloat, targetAlpha: CGFloat, zPosition: CGFloat) {
+        self.position = CGPoint(x: 0, y: verticalShift)
+        self.zPosition = zPosition
+        self.targetStackAlpha = targetAlpha
+        removeAction(forKey: Self.fadeActionKey)
+        let fade = SKAction.fadeAlpha(to: targetAlpha, duration: 0.15)
+        run(fade, withKey: Self.fadeActionKey)
     }
 
     private func apply(_ g: BalloonGeometry) {
@@ -156,18 +203,17 @@ final class BalloonNode: SKNode {
             cloudOutline.isHidden = true
             background.strokeColor = NSColor(white: 0.6, alpha: 1)
             background.lineWidth = 0.5
-            background.path = CGPath(roundedRect: g.bubbleRect,
-                                     cornerWidth: Self.cornerRadius,
-                                     cornerHeight: Self.cornerRadius,
-                                     transform: nil)
-            tail.strokeColor = background.strokeColor
-            tail.lineWidth = background.lineWidth
-            let tailPath = CGMutablePath()
-            tailPath.move(to: g.tailBaseLeft)
-            tailPath.addLine(to: g.tailBaseRight)
-            tailPath.addLine(to: g.tailApex)
-            tailPath.closeSubpath()
-            tail.path = tailPath
+            // Bubble + tail are a single continuous outline so the bubble's
+            // bottom-edge stroke doesn't draw through the join. Separate
+            // shapes for body and tail (the previous approach) left a
+            // visible horizontal seam where the tail met the bubble base.
+            background.path = Self.speechBubblePath(
+                bubbleRect: g.bubbleRect,
+                cornerRadius: Self.cornerRadius,
+                tailBaseLeftX: g.tailBaseLeft.x,
+                tailBaseRightX: g.tailBaseRight.x,
+                tailApex: g.tailApex)
+            tail.path = nil
         case .thought:
             // `cloudPath` returns a SINGLE closed bezier outline — overlapping
             // bumps share their intersection cusps, so the path traces only
@@ -181,6 +227,42 @@ final class BalloonNode: SKNode {
             // position above the pet already convey the relationship.
             tail.path = nil
         }
+    }
+
+    /// Build a single closed path tracing the rounded bubble rect plus a
+    /// downward triangular tail. Drawing the body and the tail as one path
+    /// (rather than two separate shapes) ensures the bubble's stroke
+    /// doesn't draw a horizontal line across the tail's base — the seam
+    /// you'd otherwise see at the join. Pure helper, unit-testable.
+    static func speechBubblePath(bubbleRect rect: CGRect,
+                                 cornerRadius r: CGFloat,
+                                 tailBaseLeftX: CGFloat,
+                                 tailBaseRightX: CGFloat,
+                                 tailApex: CGPoint) -> CGPath
+    {
+        let path = CGMutablePath()
+        // Trace clockwise (in y-up coords): start on the top edge just past
+        // the top-left corner radius, sweep right across the top, down the
+        // right side, leftward along the bottom (dipping into the tail
+        // between tailBaseRightX and tailBaseLeftX), then up the left side.
+        path.move(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.maxY - r),
+                    radius: r)
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.maxX - r, y: rect.minY),
+                    radius: r)
+        path.addLine(to: CGPoint(x: tailBaseRightX, y: rect.minY))
+        path.addLine(to: tailApex)
+        path.addLine(to: CGPoint(x: tailBaseLeftX, y: rect.minY))
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.minX, y: rect.minY + r),
+                    radius: r)
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.minX + r, y: rect.maxY),
+                    radius: r)
+        path.closeSubpath()
+        return path
     }
 
     /// Build a cloud-shaped path as a SINGLE closed bezier outline tracing
@@ -420,7 +502,7 @@ struct BalloonGeometry: Equatable {
             headerPosition: CGPoint(x: shift, y: headerCentreY),
             bodyPosition: CGPoint(x: shift, y: bodyCentreY),
             tailApex: CGPoint(x: 0, y: anchorY),
-            tailBaseLeft: CGPoint(x: baseCenterX - tailHalfWidth, y: bubbleY + 0.5),
-            tailBaseRight: CGPoint(x: baseCenterX + tailHalfWidth, y: bubbleY + 0.5))
+            tailBaseLeft: CGPoint(x: baseCenterX - tailHalfWidth, y: bubbleY),
+            tailBaseRight: CGPoint(x: baseCenterX + tailHalfWidth, y: bubbleY))
     }
 }

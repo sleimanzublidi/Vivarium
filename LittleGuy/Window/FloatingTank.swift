@@ -29,6 +29,12 @@ final class FloatingTank: NSWindow {
         get { skView.onPetRightClicked }
         set { skView.onPetRightClicked = newValue }
     }
+    /// Fired on left-click of a pet sprite. Argument is the pet's
+    /// `sessionKey`. Clicks elsewhere in the tank still drag the window.
+    var onPetClicked: ((String) -> Void)? {
+        get { skView.onPetClicked }
+        set { skView.onPetClicked = newValue }
+    }
 
     init(scene: SKScene,
          contentRect: NSRect = NSRect(x: 200, y: 200, width: 320, height: 160),
@@ -270,6 +276,10 @@ private extension NSScreen {
 final class PetDropSKView: SKView {
     var onPetZipDropped: (([URL]) -> Void)?
     var onPetRightClicked: ((String, NSPoint) -> Void)?
+    /// Fired on a left-click that lands on a pet sprite. Argument is the
+    /// pet's `sessionKey`. Clicks on empty tank background fall through
+    /// to AppKit so window-drag-by-background still works.
+    var onPetClicked: ((String) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -299,6 +309,24 @@ final class PetDropSKView: SKView {
         let screenRect = window?.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero))
         let screenPoint = screenRect?.origin ?? NSEvent.mouseLocation
         onPetRightClicked(pet.sessionKey, screenPoint)
+    }
+
+    /// Left-click on a pet → fire `onPetClicked`. Anywhere else, fall
+    /// through to `super` so the window's `isMovableByWindowBackground`
+    /// drag still kicks in. Clicking a pet to drag the window is a
+    /// deliberate trade-off — clicks on a pet are reserved for the greet.
+    override func mouseDown(with event: NSEvent) {
+        guard let scene = scene, let onPetClicked = onPetClicked else {
+            super.mouseDown(with: event)
+            return
+        }
+        let viewPoint = convert(event.locationInWindow, from: nil)
+        let scenePoint = convert(viewPoint, to: scene)
+        guard let pet = petNode(at: scenePoint, in: scene) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onPetClicked(pet.sessionKey)
     }
 
     /// Walk the SKNode hierarchy under `point` looking for a PetNode. Picks

@@ -29,10 +29,18 @@ final class SceneDirector {
 
     private let groundY: CGFloat
     private let petScale: CGFloat
-    private let firstSlotX: CGFloat
     private let interSlotSpacing: CGFloat
     private let balloonTTL: TimeInterval
     private let maxVisiblePets: Int
+    private let layoutAnimationDuration: TimeInterval
+
+    /// Alpha for every non-newest balloon. Older balloons stay at their
+    /// natural Y (we don't push them up — that risks clipping them off the
+    /// top of the tank) and recede via dimming + lower z instead.
+    static let balloonDimmedAlpha: CGFloat = 0.3
+    /// zPosition for the most-recent balloon. Older balloons step down so
+    /// they paint behind it where they overlap.
+    private static let balloonNewestZ: CGFloat = 110
 
     private var overflowLabel: SKLabelNode?
 
@@ -43,18 +51,18 @@ final class SceneDirector {
          maxVisiblePets: Int = 4,
          balloonTTL: TimeInterval = 8.0,
          petGap: CGFloat = 16,
-         leftMargin: CGFloat = 10)
+         leftMargin: CGFloat = 10,
+         layoutAnimationDuration: TimeInterval = 0.25)
     {
         self.library = library
         self.packsByID = packsByID
         self.petScale = petScale
         self.maxVisiblePets = maxVisiblePets
+        self.layoutAnimationDuration = layoutAnimationDuration
         self.balloonTTL = balloonTTL
-        // Slot layout: pet 0's left edge sits `leftMargin` from the scene's
-        // origin; each subsequent pet is `petWidth + petGap` further right.
-        // Anchored on the sprite's centre so position == centre.
+        // Kept for call-site compatibility; centered layout no longer uses a fixed left margin.
+        _ = leftMargin
         let petWidth = CGFloat(CodexLayout.frameWidth) * petScale
-        self.firstSlotX = leftMargin + petWidth / 2
         self.interSlotSpacing = petWidth + petGap
         let scene = SKScene(size: sceneSize)
         scene.scaleMode = .aspectFit
@@ -89,12 +97,16 @@ final class SceneDirector {
             }
             updateBalloon(session: session, on: node)
         }
+        // Always restack — covers despawn-during-reconcile freeing space in
+        // the stack as well as a fresh balloon push.
+        restackBalloons()
     }
 
     func remove(sessionKey: String) {
         sessions.removeValue(forKey: sessionKey)
         lastBalloonShownAt.removeValue(forKey: sessionKey)
         reconcileVisibility()
+        restackBalloons()
     }
 
     /// Number of pets currently rendered. Test hook.
@@ -169,8 +181,8 @@ final class SceneDirector {
     // MARK: - Visibility reconciliation
 
     /// Decide which `maxVisiblePets` sessions get pets in the scene
-    /// (most-recent `lastEventAt` wins per spec §8) and sync the scene to
-    /// match.
+    /// (most-recent `lastEventAt` wins per spec §8), sync the scene to
+    /// match, then recenter the rendered row.
     private func reconcileVisibility() {
         let sortedDesc = sessions.values.sorted { $0.lastEventAt > $1.lastEventAt }
         let visibleKeys = Set(sortedDesc.prefix(maxVisiblePets).map(\.sessionKey))
@@ -186,9 +198,13 @@ final class SceneDirector {
             .prefix(maxVisiblePets)
             .filter { nodes[$0.sessionKey] == nil }
             .sorted { $0.sessionKey < $1.sessionKey }
+        var newlySpawnedKeys = Set<String>()
         for s in newlyVisible {
             spawn(session: s)
+            newlySpawnedKeys.insert(s.sessionKey)
         }
+
+        applyCenteredLayout(newlySpawnedKeys: newlySpawnedKeys)
 
         let hidden = max(0, sessions.count - maxVisiblePets)
         updateOverflowIndicator(hiddenCount: hidden)
@@ -199,7 +215,7 @@ final class SceneDirector {
         guard let pack else { return }   // no pets installed at all
         let slot = firstFreeSlot()
         let node = PetNode(sessionKey: session.sessionKey, pack: pack, library: library, petScale: petScale)
-        node.position = position(forSlot: slot)
+        node.position = CGPoint(x: scene.size.width / 2, y: groundY)
         scene.addChild(node)
         nodes[session.sessionKey] = node
         slotForSession[session.sessionKey] = slot
@@ -223,14 +239,41 @@ final class SceneDirector {
         return slot
     }
 
-    private func position(forSlot slot: Int) -> CGPoint {
-        CGPoint(x: firstSlotX + interSlotSpacing * CGFloat(slot), y: groundY)
+    private func applyCenteredLayout(newlySpawnedKeys: Set<String>) {
+        let ordered = nodes.keys.sorted {
+            let lhsSlot = slotForSession[$0] ?? Int.max
+            let rhsSlot = slotForSession[$1] ?? Int.max
+            if lhsSlot != rhsSlot { return lhsSlot < rhsSlot }
+            return $0 < $1
+        }
+
+        for (index, key) in ordered.enumerated() {
+            guard let node = nodes[key] else { continue }
+            let target = position(forCenteredIndex: index, count: ordered.count)
+            let steadyState = sessions[key]?.state ?? node.currentState
+            if newlySpawnedKeys.contains(key) {
+                node.moveToLayoutPosition(target, steadyState: steadyState, animated: false)
+            } else {
+                node.moveToLayoutPosition(target,
+                                          steadyState: steadyState,
+                                          duration: layoutAnimationDuration)
+            }
+        }
+    }
+
+    private func position(forCenteredIndex index: Int, count: Int) -> CGPoint {
+        let midpoint = (CGFloat(count) - 1) / 2
+        let x = scene.size.width / 2 + (CGFloat(index) - midpoint) * interSlotSpacing
+        return CGPoint(x: x, y: groundY)
     }
 
     private func previewPlacement(for packID: String) -> (position: CGPoint, slot: Int?) {
         let usedSlots = Set(slotForSession.values).union(previewSlots.values)
         if let slot = (0..<maxVisiblePets).first(where: { !usedSlots.contains($0) }) {
-            return (position(forSlot: slot), slot)
+            let occupiedSlots = usedSlots.union([slot]).sorted()
+            let count = occupiedSlots.count
+            let index = occupiedSlots.firstIndex(of: slot) ?? count - 1
+            return (position(forCenteredIndex: index, count: count), slot)
         }
         return (CGPoint(x: scene.size.width / 2, y: groundY), nil)
     }
@@ -264,21 +307,81 @@ final class SceneDirector {
         guard balloon.postedAt > last else { return }
         lastBalloonShownAt[session.sessionKey] = balloon.postedAt
 
-        // Most-recent-balloon-wins: dismiss any others currently on screen so
-        // they can't visually collide. Pets are spaced ~58px apart at default
-        // scale; balloons can be up to 200px wide.
-        for (key, other) in nodes where key != session.sessionKey {
-            other.balloon.dismiss()
-        }
-
+        // No dismiss-others — overlapping balloons are deconflicted by
+        // `restackBalloons()` (called at the end of `addOrUpdate`), which
+        // shifts older balloons up to clear newer ones and dims them.
         node.balloon.present(header: session.project.label,
                              text: balloon.text,
-                             petXInScene: node.position.x,
+                             petXInScene: node.layoutTargetPosition.x,
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,
                              ttl: balloonTTL,
                              sticky: true,
                              style: session.state == .review ? .thought : .speech)
+    }
+
+    /// Order overlapping balloons so the most-recent one stays prominent
+    /// without pushing siblings around. Every balloon stays at its natural
+    /// Y; the newest renders at full alpha and the highest z, and older
+    /// ones dim to `balloonDimmedAlpha` and step down in z so they paint
+    /// behind newer neighbours where the bubbles overlap.
+    private func restackBalloons() {
+        struct Entry {
+            let date: Date
+            let key: String
+            let petNode: PetNode
+        }
+        var entries: [Entry] = []
+        for (key, petNode) in nodes {
+            guard !petNode.balloon.isHidden,
+                  petNode.balloon.lastBubbleRect != nil,
+                  let date = lastBalloonShownAt[key]
+            else { continue }
+            entries.append(Entry(date: date,
+                                 key: petNode.sessionKey,
+                                 petNode: petNode))
+        }
+        // Newest first; sessionKey breaks ties so layout is deterministic
+        // when two balloons share a postedAt timestamp.
+        let sorted = entries.sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.key < $1.key
+        }
+
+        for (idx, entry) in sorted.enumerated() {
+            let alpha: CGFloat = idx == 0 ? 1.0 : Self.balloonDimmedAlpha
+            let z: CGFloat = idx == 0
+                ? Self.balloonNewestZ
+                : Self.balloonNewestZ - 1 - CGFloat(idx)
+            entry.petNode.balloon.setStackLayout(verticalShift: 0,
+                                                 targetAlpha: alpha,
+                                                 zPosition: z)
+        }
+    }
+
+    /// User clicked an idle pet with no balloon up — wave hello and pop a
+    /// short non-sticky balloon naming its project. No-op if the pet is
+    /// busy or already has a balloon (the existing message takes priority
+    /// over a casual greet, and we shouldn't interrupt animations like
+    /// `.running` mid-tool). The greet balloon hoists above sibling
+    /// balloons via z but doesn't enter `lastBalloonShownAt`, so it
+    /// doesn't disturb the dim/z-order of any other pets' active balloons.
+    func greet(sessionKey: String) {
+        guard let session = sessions[sessionKey],
+              let node = nodes[sessionKey],
+              session.state == .idle,
+              node.balloon.isHidden else { return }
+        node.playSpawnGreeting(then: .idle)
+        node.balloon.present(header: "",
+                             text: session.project.label,
+                             petXInScene: node.layoutTargetPosition.x,
+                             sceneWidth: scene.size.width,
+                             anchorY: node.size.height / 2 + 2,
+                             ttl: 3.0,
+                             sticky: false)
+        // +1 above the newest stack member so the greet paints in front
+        // of any sibling-pet balloons currently visible.
+        node.balloon.zPosition = Self.balloonNewestZ + 1
     }
 
     static func showsStickyBalloon(for state: PetState) -> Bool {

@@ -101,6 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tank.onPetRightClicked = { [weak self] sessionKey, screenPoint in
             self?.showPetSelectionMenu(forSessionKey: sessionKey, at: screenPoint)
         }
+        tank.onPetClicked = { [weak self] sessionKey in
+            self?.director.greet(sessionKey: sessionKey)
+        }
         tank.makeKeyAndOrderFront(nil)
 
         installMenuBarItem()
