@@ -4,26 +4,6 @@ import SpriteKit
 @testable import Vivarium
 
 final class BalloonNodeTests: XCTestCase {
-    func test_truncate_keepsShortStringIntact() {
-        XCTAssertEqual(BalloonNode.truncate("hello", max: 60), "hello")
-    }
-
-    func test_truncate_atBoundaryIsUnchanged() {
-        let s = String(repeating: "a", count: 60)
-        XCTAssertEqual(BalloonNode.truncate(s, max: 60), s)
-    }
-
-    func test_truncate_appendsEllipsisWhenOverLimit() {
-        let s = String(repeating: "a", count: 75)
-        let out = BalloonNode.truncate(s, max: 60)
-        XCTAssertEqual(out.count, 60)
-        XCTAssertTrue(out.hasSuffix("…"))
-    }
-
-    func test_truncate_zeroMaxReturnsEmpty() {
-        XCTAssertEqual(BalloonNode.truncate("anything", max: 0), "")
-    }
-
     func test_present_unhidesNode() {
         let balloon = BalloonNode()
         XCTAssertTrue(balloon.isHidden)

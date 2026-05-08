@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.showPetSelectionMenu(forSessionKey: sessionKey, at: screenPoint)
         }
         tank.onPetClicked = { [weak self] sessionKey in
-            self?.director.greet(sessionKey: sessionKey)
+            self?.director.handlePetClick(sessionKey: sessionKey)
         }
         tank.makeKeyAndOrderFront(nil)
 

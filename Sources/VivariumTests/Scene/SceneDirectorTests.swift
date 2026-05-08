@@ -287,4 +287,90 @@ final class SceneDirectorTests: XCTestCase {
         XCTAssertEqual(preview.layoutTargetPosition.x, 300, accuracy: 0.001,
                        "removing the only real pet must recenter the surviving preview")
     }
+
+    /// A click on a pet whose balloon was dimmed by a newer sibling
+    /// must un-dim it and lift it above the newest stack member, so the
+    /// user can re-read what that pet last said without waiting for new
+    /// agent activity.
+    func test_handlePetClick_undimsAndLiftsDimmedBalloon() {
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": validPack()],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let t = Date()
+        var s1 = Session(agent: .claudeCode, sessionKey: "k1",
+                         project: project, startedAt: t)
+        s1.state = .waiting
+        s1.lastBalloon = BalloonText(text: "older", postedAt: t)
+        var s2 = Session(agent: .claudeCode, sessionKey: "k2",
+                         project: project, startedAt: t.addingTimeInterval(1))
+        s2.state = .waiting
+        s2.lastBalloon = BalloonText(text: "newer", postedAt: t.addingTimeInterval(1))
+
+        director.addOrUpdate(session: s1)
+        director.addOrUpdate(session: s2)
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let older = pets.first { $0.sessionKey == "k1" }!
+        let newer = pets.first { $0.sessionKey == "k2" }!
+        XCTAssertEqual(older.balloon.targetStackAlpha,
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "older balloon should be dimmed after newer one stacks on top")
+
+        director.handlePetClick(sessionKey: "k1")
+
+        XCTAssertEqual(older.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "click should un-dim the older balloon")
+        XCTAssertGreaterThan(older.balloon.zPosition, newer.balloon.zPosition,
+                             "click should lift the older balloon above the previously-newest one")
+    }
+
+    /// Click on a pet with an already-prominent balloon is a no-op — the
+    /// message is the foreground conversation, nothing to promote.
+    func test_handlePetClick_activeBalloon_isNoOp() {
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": validPack()],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        var s = Session(agent: .claudeCode, sessionKey: "k1",
+                        project: project, startedAt: Date())
+        s.state = .waiting
+        s.lastBalloon = BalloonText(text: "still relevant", postedAt: Date())
+        director.addOrUpdate(session: s)
+
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        let zBefore = pet.balloon.zPosition
+        director.handlePetClick(sessionKey: "k1")
+        XCTAssertEqual(pet.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "active balloon stays at full alpha")
+        XCTAssertEqual(pet.balloon.zPosition, zBefore, accuracy: 0.001,
+                       "active balloon click should not change z")
+    }
+
+    /// Click on a pet with no balloon falls through to `greet(...)`,
+    /// which (for an idle pet) presents a short project-name balloon.
+    func test_handlePetClick_noBalloon_idlePet_triggersGreet() {
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": validPack()],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        var s = Session(agent: .claudeCode, sessionKey: "k1",
+                        project: project, startedAt: Date())
+        s.state = .idle
+        director.addOrUpdate(session: s)
+
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        XCTAssertTrue(pet.balloon.isHidden, "no sticky balloon for idle state")
+
+        director.handlePetClick(sessionKey: "k1")
+
+        XCTAssertFalse(pet.balloon.isHidden,
+                       "click on idle pet with no balloon should pop the greet balloon")
+    }
 }

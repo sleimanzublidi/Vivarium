@@ -2,17 +2,20 @@
 import AppKit
 import SpriteKit
 
-/// Speech balloon shown above a pet (spec §8 layer 3). Truncates the body
-/// text to 60 characters and prefixes it with a small project header so a
-/// row of pets is identifiable at a glance.
+/// Speech balloon shown above a pet (spec §8 layer 3). Body wraps to at
+/// most 3 lines with tail truncation; bubble width is bounded per-call by
+/// `bubbleMaxWidth` so it stays roughly pet-sized and doesn't drift over
+/// neighbouring pets in a row of agents.
 ///
 /// The balloon is a child of the pet, so its origin sits at the pet's
 /// centre. To prevent clipping at the edges of a small scene, `present`
 /// shifts the bubble horizontally while keeping the tail anchored to the
 /// pet — see `BalloonGeometry.compute`.
 final class BalloonNode: SKNode {
-    static let maxChars = 60
-    static let preferredWidth: CGFloat = 200
+    /// Default bubble max-width when callers don't specify one (tests).
+    /// Production callers (SceneDirector) compute pet-relative bounds.
+    static let defaultBubbleMaxWidth: CGFloat = 200
+    static let bodyMaxLines = 3
     static let cornerRadius: CGFloat = 6
     static let padding = CGSize(width: 8, height: 5)
     static let tailHeight: CGFloat = 5
@@ -63,7 +66,7 @@ final class BalloonNode: SKNode {
         header.fontSize = Self.headerFontSize
         header.fontColor = NSColor(white: 0.35, alpha: 1)
         header.numberOfLines = 1
-        header.preferredMaxLayoutWidth = Self.preferredWidth - Self.padding.width * 2
+        header.lineBreakMode = .byTruncatingTail
         header.horizontalAlignmentMode = .center
         header.verticalAlignmentMode = .center
         self.header = header
@@ -71,9 +74,8 @@ final class BalloonNode: SKNode {
         let body = SKLabelNode(fontNamed: Self.roundedFontName(size: Self.bodyFontSize, weight: .regular))
         body.fontSize = Self.bodyFontSize
         body.fontColor = NSColor(white: 0.1, alpha: 1)
-        body.numberOfLines = 2
+        body.numberOfLines = Self.bodyMaxLines
         body.lineBreakMode = .byTruncatingTail
-        body.preferredMaxLayoutWidth = Self.preferredWidth - Self.padding.width * 2
         body.horizontalAlignmentMode = .center
         body.verticalAlignmentMode = .center
         self.body = body
@@ -125,6 +127,7 @@ final class BalloonNode: SKNode {
                  petXInScene: CGFloat,
                  sceneWidth: CGFloat,
                  anchorY: CGFloat,
+                 bubbleMaxWidth: CGFloat = BalloonNode.defaultBubbleMaxWidth,
                  ttl: TimeInterval = 8.0,
                  sticky: Bool = false,
                  style: Style = .speech)
@@ -132,7 +135,13 @@ final class BalloonNode: SKNode {
         let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
         self.header.text = trimmedHeader.isEmpty ? nil : trimmedHeader
         self.header.isHidden = trimmedHeader.isEmpty
-        body.text = Self.truncate(text, max: Self.maxChars)
+        // Bound text-wrap width so the bubble grows vertically (up to
+        // `bodyMaxLines`) instead of horizontally past its owner pet.
+        // SKLabelNode's tail-truncate handles overflow beyond that.
+        let textMaxWidth = max(0, bubbleMaxWidth - Self.padding.width * 2)
+        self.header.preferredMaxLayoutWidth = textMaxWidth
+        self.body.preferredMaxLayoutWidth = textMaxWidth
+        body.text = text
         self.style = style
 
         let geom = BalloonGeometry.compute(
@@ -415,14 +424,6 @@ final class BalloonNode: SKNode {
         return base.fontName.isEmpty ? "HelveticaNeue" : base.fontName
     }
 
-    /// Truncate `s` to at most `max` characters, replacing the trailing
-    /// character with an ellipsis when truncation occurred. Pure helper —
-    /// unit-testable without a SpriteKit scene.
-    static func truncate(_ s: String, max: Int) -> String {
-        guard max > 0 else { return "" }
-        guard s.count > max else { return s }
-        return s.prefix(max - 1) + "…"
-    }
 }
 
 /// Pure geometric layout for `BalloonNode`. Lives in balloon-local

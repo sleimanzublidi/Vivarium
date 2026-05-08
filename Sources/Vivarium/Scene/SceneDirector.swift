@@ -41,6 +41,10 @@ final class SceneDirector {
     /// zPosition for the most-recent balloon. Older balloons step down so
     /// they paint behind it where they overlap.
     private static let balloonNewestZ: CGFloat = 110
+    /// Per-side overhang: balloon max-width = pet width + 2 × this. Keeps
+    /// each balloon roughly above its own pet when several agents are
+    /// talking at once, instead of stretching across neighbours.
+    static let balloonHorizontalOverhang: CGFloat = 16
 
     private var overflowLabel: SKLabelNode?
 
@@ -174,6 +178,7 @@ final class SceneDirector {
                              petXInScene: node.position.x,
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,
+                             bubbleMaxWidth: bubbleMaxWidth(for: node),
                              sticky: true)
 
         guard duration > 0 else {
@@ -348,9 +353,14 @@ final class SceneDirector {
                              petXInScene: node.layoutTargetPosition.x,
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,
+                             bubbleMaxWidth: bubbleMaxWidth(for: node),
                              ttl: balloonTTL,
                              sticky: true,
                              style: session.state == .review ? .thought : .speech)
+    }
+
+    private func bubbleMaxWidth(for node: PetNode) -> CGFloat {
+        node.size.width + 2 * Self.balloonHorizontalOverhang
     }
 
     /// Order overlapping balloons so the most-recent one stays prominent
@@ -410,11 +420,34 @@ final class SceneDirector {
                              petXInScene: node.layoutTargetPosition.x,
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,
+                             bubbleMaxWidth: bubbleMaxWidth(for: node),
                              ttl: 3.0,
                              sticky: false)
         // +1 above the newest stack member so the greet paints in front
         // of any sibling-pet balloons currently visible.
         node.balloon.zPosition = Self.balloonNewestZ + 1
+    }
+
+    /// Left-click dispatch from the floating tank.
+    /// - No balloon → fall through to `greet(...)` (the existing wave +
+    ///   project-name bubble, gated on the pet being idle).
+    /// - Balloon present and currently dimmed (older message a newer
+    ///   balloon stacked on top of) → un-dim it and lift its zPosition
+    ///   above the newest stack member, so the user can re-read what that
+    ///   pet was last saying without waiting for new agent activity.
+    /// - Balloon present and not dimmed → no-op; the message is already
+    ///   prominent.
+    func handlePetClick(sessionKey: String) {
+        guard let node = nodes[sessionKey] else { return }
+        if node.balloon.isHidden {
+            greet(sessionKey: sessionKey)
+            return
+        }
+        if node.balloon.targetStackAlpha < 1.0 {
+            node.balloon.setStackLayout(verticalShift: 0,
+                                        targetAlpha: 1.0,
+                                        zPosition: Self.balloonNewestZ + 1)
+        }
     }
 
     static func showsStickyBalloon(for state: PetState) -> Bool {
