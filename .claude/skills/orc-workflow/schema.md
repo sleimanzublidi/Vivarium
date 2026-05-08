@@ -33,6 +33,7 @@ Known types: `string`, `file`, `bool`.
 | `id` | String | Yes | — | Unique, non-empty |
 | `agent` | String | Conditional | nil | Required unless `command`, `workflow`, or `interactive: prompt` is set. Values: `claude-code`, `shell`, or custom agent name from config |
 | `prompt` | String | No | nil | Template string sent to agent |
+| `prompt_file` | String | No | nil | Path to a markdown/text prompt file. Contents are loaded and resolved as the node prompt |
 | `command` | String | No | nil | Shell command (used instead of `agent` for pure shell nodes) |
 | `depends_on` | [String] or String | No | [] | Node IDs this node depends on. Accepts both array and single string |
 | `output` | String | No | nil | Output alias — makes `{{alias}}` equivalent to `{{node_id.output}}`. Must not collide with other node IDs or input names |
@@ -48,7 +49,9 @@ Known types: `string`, `file`, `bool`.
 | `workspace` | `"shared"` / `"isolated"` | No | `"shared"` | Workspace mode for nested workflows |
 | `parameters` | {String: String} | No | `{}` | Provider-specific key-value pairs. Values support `{{template}}` syntax. See Provider Parameters below |
 
-**Template-compatible config fields:** `agent`, `timeout_seconds`, `on_failure`, `workspace`, and values inside `parameters` accept `{{template}}` strings in addition to literal values. The template is resolved before the value is interpreted.
+`prompt` and `prompt_file` are mutually exclusive. Use `prompt_file` for long reusable prompts, normally under `.orc/prompts/`.
+
+**Template-compatible config fields:** `agent`, `prompt_file`, `timeout_seconds`, `on_failure`, `workspace`, and values inside `parameters` accept `{{template}}` strings in addition to literal values. The template is resolved before the value is interpreted.
 
 **Constraint:** A node must have at least one of: `agent`, `command`, `workflow`, or `interactive: prompt`.
 
@@ -208,6 +211,9 @@ Custom evaluators can be defined in `.orc/evaluators/<name>.yml`.
 Custom provider config example in `.orc/config.yml`:
 ```yaml
 providers:
+  copilot:
+    type: cli-agent
+    command: "copilot '{{prompt}}'"
   codex:
     type: cli-agent
     command: "codex -q '{{prompt}}'"

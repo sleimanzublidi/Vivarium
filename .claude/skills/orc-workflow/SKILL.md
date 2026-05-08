@@ -11,7 +11,7 @@ allowed_tools:
 
 # Orc Workflow
 
-Create, modify, and review Orc workflow YAML files.
+Create, modify, and review Orc workflow YAML files. Prefer provider-neutral workflows that can run with `claude-code`, Copilot, Codex, or any configured `cli-agent` unless the user asks for a specific provider.
 
 ## Commands
 
@@ -49,12 +49,12 @@ Do **NOT** read any other files in the codebase. All information needed to gener
 
 When the user asks to create a new workflow:
 
-1. **Parse the request** to identify: nodes (steps), agents (`claude-code`, `shell`, or custom), dependencies between nodes, inputs/outputs, and any advanced features (loops, conditionals, retries, interactive prompts).
+1. **Parse the request** to identify: nodes (steps), agents (`shell`, `claude-code`, or a custom configured `cli-agent` such as `copilot`), dependencies between nodes, inputs/outputs, and any advanced features (loops, conditionals, retries, interactive prompts).
 
 2. **If the request is clear**, generate the full YAML directly. Do not ask unnecessary questions. Most workflows are straightforward — a few nodes with obvious ordering.
 
 3. **If the request is ambiguous**, ask targeted clarifying questions — one at a time, multiple choice preferred. Common ambiguities:
-   - Which agent to use for a step (shell vs claude-code)
+   - Which agent to use for a step (`shell` vs an AI provider)
    - Dependency ordering when steps could run in parallel or sequentially
    - Whether an input should be required or optional
    - Whether a loop/retry is needed
@@ -101,7 +101,7 @@ Review a workflow for correctness, consistency, and quality.
    - **Dependency correctness**: does `depends_on` match actual data flow? A node using `{{foo}}` must depend on the node that produces `foo`.
    - **Output mapping**: does the top-level `output:` map reference variables that actually exist?
    - **Nested workflow interface**: do `inputs:` passed to nested workflows match what the child actually uses? Are any pass-throughs redundant (e.g., passing builtins that are already available)?
-   - **Prompt quality**: are agent prompts clear about what to do, what files to read, and what format to output? Are there contradictory instructions?
+   - **Prompt quality**: are inline prompts or `prompt_file` prompts clear about what to do, what files to read, and what format to output? Are they provider-neutral, or do they assume one agent such as Claude when the workflow should also work with Copilot/custom agents? Are there contradictory instructions?
    - **When guards**: do conditional expressions reference valid statuses/outputs? Could a guard prevent a node from ever running?
 
    If issues are found, report each one with its location and propose a fix. Ask the user if they want to apply the fixes.
@@ -161,7 +161,7 @@ Poll `orc status <run-id>` every **60 seconds**. After each check, report a sing
 
 To determine what a node is doing:
 - If a node just transitioned to `running`, note what it is (e.g., "ideation agent started", "building/testing").
-- If a node has been running for multiple checks, verify the agent process is alive: `ps aux | grep "claude -p" | grep -v grep`. Report CPU time progression to confirm it's not stuck.
+- If a node has been running for multiple checks, verify the provider process is alive (for example, look for the configured CLI command such as `claude`, `copilot`, `codex`, or a custom provider command). Report CPU time progression to confirm it's not stuck.
 - If new nodes appeared since last check, report the transition (e.g., "`review` completed, `implement` now running").
 - Check `git status --short` and `git log --oneline -3` periodically to observe implementation progress (new/modified files, new commits).
 
@@ -226,12 +226,24 @@ If `orc start` fails for any reason other than "already running":
 
 - Use `output` aliases on nodes to create clean variable names (e.g., `output: summary` instead of referencing `{{summarize.output}}`).
 - Use `| default:` for optional inputs so workflows work without arguments.
-- Prefer `claude-code` for tasks requiring reasoning, analysis, or code generation. Use `shell` for deterministic commands (echo, file operations, scripts).
+- Use `shell` for deterministic commands (echo, file operations, scripts). For reasoning, analysis, or code generation, prefer a provider-neutral `agent` input:
+  ```yaml
+  input:
+    - name: agent
+      type: string
+      default: "claude-code"
+  nodes:
+    - id: analyze
+      agent: "{{agent}}"
+      prompt: "Analyze this project."
+  ```
+  This lets callers run the same workflow with `--input agent="copilot"` or another configured provider.
 - Set `depends_on` only when a node actually needs another node's output or must run after it. Nodes without dependencies run in parallel automatically.
 - Use `when:` guards for conditional branching — not for sequencing (that's what `depends_on` is for).
 - Use `on_failure: continue` when downstream nodes should still run despite a failure. Use `on_failure: skip` when the node is optional.
-- Keep prompts focused. For `claude-code` nodes, be explicit about what files to read/not read.
-- Use `parameters:` on `claude-code` nodes to pass provider-specific config. Use `permission_mode: dontAsk` when the agent needs to run shell commands autonomously. Use `bare: "true"` for minimal mode (requires `ANTHROPIC_API_KEY` in `.orc/.env`). Avoid `bypassPermissions` unless the workflow is fully trusted.
+- Keep prompts focused and provider-neutral. Avoid "Claude-only" wording unless the workflow intentionally targets Claude Code. For repository conventions, ask agents to read guidance files that exist, such as `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `CONTRIBUTING.md`, and `README.md`.
+- Use `prompt_file` for long reusable prompts under `.orc/prompts/`; use inline `prompt` for short one-off instructions. Do not set both on the same node.
+- Use `parameters:` only for provider-specific config. `claude-code` supports `permission_mode`, `bare`, and `model`; `shell` and generic `cli-agent` providers ignore unknown parameters.
 
 ## Examples
 
@@ -272,18 +284,21 @@ name: analyze
 description: Summarizes a file and suggests improvements.
 
 input:
+  - name: agent
+    type: string
+    default: "claude-code"
   - name: file
     type: file
     required: true
 
 nodes:
   - id: summarize
-    agent: claude-code
+    agent: "{{agent}}"
     prompt: "Read {{file}} and provide a brief summary."
     output: summary
 
   - id: improve
-    agent: claude-code
+    agent: "{{agent}}"
     prompt: "Given this summary of {{file}}:\n\n{{summary}}\n\nSuggest concrete improvements."
     depends_on: summarize
     output: suggestions
@@ -380,13 +395,16 @@ name: review-loop
 description: Reviews a file iteratively until all issues are resolved.
 
 input:
+  - name: agent
+    type: string
+    default: "claude-code"
   - name: file
     type: file
     required: true
 
 nodes:
   - id: review
-    agent: claude-code
+    agent: "{{agent}}"
     prompt: "Review {{file}} for bugs and style issues. List each issue on its own line. If no issues remain, say APPROVED."
     output: review_result
     loop:
@@ -394,7 +412,7 @@ nodes:
       max_iterations: 5
 
   - id: fix
-    agent: claude-code
+    agent: "{{agent}}"
     prompt: "Fix the issues found in {{file}}:\n\n{{review_result}}"
     depends_on: review
     when: "{{review.status}} == 'completed'"
