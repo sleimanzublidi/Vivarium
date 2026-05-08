@@ -78,20 +78,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Skip the production socket entirely when hosted under XCTest. Tests of the
+        // app target launch the full app process; without this guard, every test pass
+        // would unlink and rebind ~/.vivarium/sock, silently stealing the path from a
+        // running production app and leaving its clients connecting to a dead inode.
         let normalizer = self.normalizer
-        do {
-            server = try SocketServer(socketURL: socketURL) { [store] line in
-                let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
-                if let event = normalizer.normalize(line: line) {
-                    logger.debug("sock OK agent=\(event.agent.rawValue, privacy: .public) kind=\(String(describing: event.kind), privacy: .public) sessionKey=\(event.sessionKey, privacy: .public) cwd=\(event.cwd.path, privacy: .public)")
-                    await store.apply(event)
-                } else {
-                    logger.warning("sock DROPPED (\(line.count, privacy: .public)B) — \(preview, privacy: .public)")
+        if Self.isRunningTests {
+            logger.info("XCTest host detected — skipping SocketServer startup")
+        } else {
+            do {
+                server = try SocketServer(socketURL: socketURL) { [store] line in
+                    let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
+                    if let event = normalizer.normalize(line: line) {
+                        logger.debug("sock OK agent=\(event.agent.rawValue, privacy: .public) kind=\(String(describing: event.kind), privacy: .public) sessionKey=\(event.sessionKey, privacy: .public) cwd=\(event.cwd.path, privacy: .public)")
+                        await store.apply(event)
+                    } else {
+                        logger.warning("sock DROPPED (\(line.count, privacy: .public)B) — \(preview, privacy: .public)")
+                    }
                 }
+                try server.start()
+            } catch {
+                logger.error("socket startup failed: \(String(describing: error), privacy: .public)")
             }
-            try server.start()
-        } catch {
-            logger.error("socket startup failed: \(String(describing: error), privacy: .public)")
         }
 
         tank = FloatingTank(scene: director.scene)
@@ -215,6 +223,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// sprite + balloon rendering without driving real agent events.
     private static var debugGridEnabled: Bool {
         ProcessInfo.processInfo.environment["VIVARIUM_DEBUG_GRID"] == "1"
+    }
+
+    /// True when the app is hosted by XCTest — Xcode tests of the app target
+    /// launch the full process, and we must not let the test pass touch the
+    /// production socket.
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
     private func installDebugGrid(packs: [PetPack]) {

@@ -44,6 +44,38 @@ final class SocketServerTests: XCTestCase {
         let perms = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0
         XCTAssertEqual(perms, 0o600)
     }
+
+    func test_secondStart_throwsWhilePrimaryListening() throws {
+        let url = tempSocketURL()
+        let primary = try SocketServer(socketURL: url) { _ in }
+        try primary.start()
+        defer { primary.stop() }
+
+        // A second instance binding to the same path must be refused — otherwise
+        // it would unlink the live socket and silently steal the path.
+        let secondary = try SocketServer(socketURL: url) { _ in }
+        XCTAssertThrowsError(try secondary.start()) { error in
+            XCTAssertEqual((error as NSError).domain, "SocketServer")
+            XCTAssertEqual((error as NSError).code, Int(EADDRINUSE))
+        }
+
+        // Primary must still be reachable: connect succeeds.
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertTrue(probe >= 0)
+        defer { close(probe) }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        _ = url.path.withCString { src in
+            withUnsafeMutableBytes(of: &addr.sun_path) { dst in
+                strncpy(dst.baseAddress!.assumingMemoryBound(to: CChar.self), src, dst.count - 1)
+            }
+        }
+        let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let r: Int32 = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(probe, $0, len) }
+        }
+        XCTAssertEqual(r, 0, "primary listener became unreachable after rejected secondary start")
+    }
 }
 
 // MARK: - tiny test helpers
