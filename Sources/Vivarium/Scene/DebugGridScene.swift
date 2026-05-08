@@ -46,6 +46,13 @@ final class DebugGridScene: SKScene {
         scaleMode = .aspectFit
         backgroundColor = .black
 
+        // Prewarm the texture cache so the first paint of each cell isn't a
+        // cache-cold slice; without this the grid spends ~1ms per state on its
+        // first frame even though we know we'll need all nine.
+        for state in Self.states {
+            _ = library.textures(for: state, in: pack)
+        }
+
         for (index, state) in Self.states.enumerated() {
             let row = index / columns
             let col = index % columns

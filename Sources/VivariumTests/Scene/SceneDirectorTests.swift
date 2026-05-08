@@ -241,6 +241,30 @@ final class SceneDirectorTests: XCTestCase {
                        "after the preview is torn down the surviving pet must slide back to center")
     }
 
+    func test_register_invalidatesTextureCacheForPackID() {
+        // A re-install of a pack with the same id replaces the underlying
+        // CGImage but keeps the id stable. The director's `register(pack:)`
+        // must drop any cached spritesheet slices for that id so subsequent
+        // animations render the new artwork instead of the previous one.
+        let library = PetLibrary()
+        let original = validPack()
+        let director = SceneDirector(library: library,
+                                     packsByID: ["sample-pet": original],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+
+        let beforeReinstall = library.textures(for: .idle, in: original)
+        XCTAssertFalse(beforeReinstall.isEmpty)
+
+        director.register(pack: original)
+
+        let afterReinstall = library.textures(for: .idle, in: original)
+        for (a, b) in zip(beforeReinstall, afterReinstall) {
+            XCTAssertFalse(a === b,
+                           "register(pack:) must invalidate cached textures for that pack id")
+        }
+    }
+
     func test_remove_recentersPreviewWhenLastRealPetGoesAway() {
         // A preview pet sharing the row with a real pet must re-center when
         // the real pet's session disappears.

@@ -46,6 +46,13 @@ final class PetLibrary {
 
     private let dimensionTolerance = 1
 
+    /// Sliced spritesheet textures, keyed by `pack.manifest.id` then `PetState`.
+    /// Populated lazily on the first `textures(for:in:)` call for a given
+    /// `(packID, state)` and dropped via `invalidateTextures(forPackID:)`
+    /// when a pack with that id is replaced on disk (drag-and-drop reinstall).
+    /// Accessed from the main thread only — see `PetPack`'s thread-safety note.
+    private var textureCache: [String: [PetState: [SKTexture]]] = [:]
+
     /// Load a pack at `directory`. `directory` must contain `pet.json` and a `spritesheet.{png,webp}`.
     func loadPack(at directory: URL) -> LoadResult {
         let manifestURL = directory.appendingPathComponent("pet.json")
@@ -99,8 +106,25 @@ final class PetLibrary {
     }
 
     /// Slice a row of the spritesheet into per-frame textures.
-    /// Caller is responsible for caching if needed.
+    /// Cached per `(pack.manifest.id, state)`; subsequent calls return the same
+    /// `SKTexture` instances until `invalidateTextures(forPackID:)` is called.
     func textures(for state: PetState, in pack: PetPack) -> [SKTexture] {
+        if let cached = textureCache[pack.manifest.id]?[state] {
+            return cached
+        }
+        let sliced = sliceTextures(for: state, in: pack)
+        textureCache[pack.manifest.id, default: [:]][state] = sliced
+        return sliced
+    }
+
+    /// Drop cached spritesheet slices for `packID`. Call after replacing a pack
+    /// with the same id (drag-and-drop reinstall) so the next `textures(for:in:)`
+    /// call re-slices from the new image instead of returning stale frames.
+    func invalidateTextures(forPackID packID: String) {
+        textureCache.removeValue(forKey: packID)
+    }
+
+    private func sliceTextures(for state: PetState, in pack: PetPack) -> [SKTexture] {
         let spec = CodexLayout.rowSpec(for: state)
         let base = SKTexture(cgImage: pack.image)
         var out: [SKTexture] = []

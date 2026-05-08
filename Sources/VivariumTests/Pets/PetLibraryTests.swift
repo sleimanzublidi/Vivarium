@@ -1,5 +1,6 @@
 // VivariumTests/Pets/PetLibraryTests.swift
 import XCTest
+import SpriteKit
 @testable import Vivarium
 
 final class PetLibraryTests: XCTestCase {
@@ -209,6 +210,122 @@ extension PetLibraryTests {
                 return
             }
         }
+    }
+
+    func test_textures_returnsSameInstancesOnRepeatCall() {
+        let library = PetLibrary()
+        let pack = loadValidPack(in: library)
+
+        let first = library.textures(for: .running, in: pack)
+        let second = library.textures(for: .running, in: pack)
+
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertEqual(first.count, second.count)
+        for (a, b) in zip(first, second) {
+            // Reference equality: cached lookup must hand back the original
+            // SKTextures, not freshly-sliced copies.
+            XCTAssertTrue(a === b)
+        }
+    }
+
+    func test_textures_cachesPerStateIndependently() {
+        let library = PetLibrary()
+        let pack = loadValidPack(in: library)
+
+        let idle = library.textures(for: .idle, in: pack)
+        let running = library.textures(for: .running, in: pack)
+
+        XCTAssertFalse(idle.isEmpty)
+        XCTAssertFalse(running.isEmpty)
+        // Different states slice different rows; the texture identities must
+        // not overlap, otherwise two states would animate the same frames.
+        for a in idle {
+            for b in running {
+                XCTAssertFalse(a === b)
+            }
+        }
+
+        let idleAgain = library.textures(for: .idle, in: pack)
+        for (a, b) in zip(idle, idleAgain) { XCTAssertTrue(a === b) }
+    }
+
+    func test_invalidateTextures_dropsCacheForPack() {
+        let library = PetLibrary()
+        let pack = loadValidPack(in: library)
+
+        let before = library.textures(for: .waving, in: pack)
+        library.invalidateTextures(forPackID: pack.manifest.id)
+        let after = library.textures(for: .waving, in: pack)
+
+        XCTAssertEqual(before.count, after.count)
+        XCTAssertFalse(before.isEmpty)
+        // After invalidation the next call re-slices from scratch, so the
+        // returned textures must be fresh instances rather than the cached ones.
+        for (a, b) in zip(before, after) {
+            XCTAssertFalse(a === b)
+        }
+    }
+
+    func test_invalidateTextures_onlyAffectsTargetPackID() {
+        let library = PetLibrary()
+        let packA = loadValidPack(in: library)
+
+        let userPets = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pl-cache-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: userPets, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: userPets) }
+        let petBDir = userPets.appendingPathComponent("other-pet", isDirectory: true)
+        try! FileManager.default.createDirectory(at: petBDir, withIntermediateDirectories: true)
+        let manifestB = #"{ "id": "other-pet", "displayName": "Other" }"#
+        try! manifestB.data(using: .utf8)!.write(to: petBDir.appendingPathComponent("pet.json"))
+        let png = fixture("valid-pet/spritesheet.png")
+        try! FileManager.default.copyItem(at: png, to: petBDir.appendingPathComponent("spritesheet.png"))
+        guard case .ok(let packB) = library.loadPack(at: petBDir) else {
+            return XCTFail("expected other-pet fixture to load")
+        }
+
+        let aBefore = library.textures(for: .idle, in: packA)
+        let bBefore = library.textures(for: .idle, in: packB)
+
+        library.invalidateTextures(forPackID: packA.manifest.id)
+
+        let aAfter = library.textures(for: .idle, in: packA)
+        let bAfter = library.textures(for: .idle, in: packB)
+
+        for (a, b) in zip(aBefore, aAfter) { XCTAssertFalse(a === b) }
+        // Pack B's cache was untouched, so its textures keep their identity.
+        for (a, b) in zip(bBefore, bAfter) { XCTAssertTrue(a === b) }
+    }
+
+    func test_textures_cachedLookupIsFasterThanInitialSlice() {
+        let library = PetLibrary()
+        let pack = loadValidPack(in: library)
+
+        let coldStart = DispatchTime.now()
+        _ = library.textures(for: .running, in: pack)
+        let coldEnd = DispatchTime.now()
+        let coldNs = coldEnd.uptimeNanoseconds - coldStart.uptimeNanoseconds
+
+        let hotStart = DispatchTime.now()
+        for _ in 0..<1_000 {
+            _ = library.textures(for: .running, in: pack)
+        }
+        let hotEnd = DispatchTime.now()
+        let hotNs = hotEnd.uptimeNanoseconds - hotStart.uptimeNanoseconds
+        let hotMeanNs = hotNs / 1_000
+
+        // The cached path should be at least an order of magnitude cheaper
+        // than the cold slice (real-world ratio is ~100×); we use 10× as the
+        // assertion threshold to keep the test stable across noisy CI hosts.
+        XCTAssertLessThan(hotMeanNs * 10, coldNs,
+                          "cached lookup mean (\(hotMeanNs) ns) should be much smaller than cold slice (\(coldNs) ns)")
+    }
+
+    private func loadValidPack(in library: PetLibrary) -> PetPack {
+        guard case .ok(let pack) = library.loadPack(at: fixture("valid-pet")) else {
+            fatalError("expected valid-pet fixture to load")
+        }
+        return pack
     }
 
     private func tempDir() -> URL {

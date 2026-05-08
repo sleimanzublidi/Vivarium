@@ -119,6 +119,11 @@ final class SceneDirector {
     var previewPetCount: Int { previewNodes.count }
 
     func register(pack: PetPack) {
+        // Drop any cached spritesheet slices first: a re-install of a pack with
+        // the same id keeps the dictionary entry overwritten below valid, but
+        // the textures cached against that id are now sliced from a stale
+        // CGImage and would render the previous artwork.
+        library.invalidateTextures(forPackID: pack.manifest.id)
         packsByID[pack.manifest.id] = pack
     }
 
