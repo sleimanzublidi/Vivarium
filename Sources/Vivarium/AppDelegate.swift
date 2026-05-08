@@ -14,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var library: PetLibrary!
     private var settingsStore: GlobalSettingsStore!
     private var statusItem: NSStatusItem!
+    // Attention-alert scaffolding — disabled until a user-facing
+    // notifications setting is added. Implementation files live alongside
+    // this one (SessionAlertCoordinator, SystemSessionAlertNotifier).
+    // private var alertCoordinator: SessionAlertCoordinator!
+    // private var alertNotifier: SystemSessionAlertNotifier!
     private var debugGridScene: DebugGridScene?
     private var debugGridPacks: [PetPack] = []
     private let petRegistry = InstalledPetRegistry()
@@ -65,10 +70,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   sceneSize: CGSize(width: 320, height: 160),
                                   petScale: 0.3)
 
+        // Attention-alert wiring (disabled — see notifications setting TODO):
+        // alertNotifier = SystemSessionAlertNotifier()
+        // alertNotifier.requestAuthorization()
+        // alertCoordinator = SessionAlertCoordinator(notifier: alertNotifier)
+
         let store = self.store!
         let director = self.director!
+        // let alertCoordinator = self.alertCoordinator!
         Task { @MainActor in
             for await event in await store.events() {
+                // alertCoordinator.handle(event)
                 switch event {
                 case .added(let s), .changed(let s):
                     director.addOrUpdate(session: s)
