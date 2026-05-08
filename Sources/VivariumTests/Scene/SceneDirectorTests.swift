@@ -188,4 +188,79 @@ final class SceneDirectorTests: XCTestCase {
         XCTAssertEqual(director.previewPetCount, 0)
         XCTAssertTrue(director.scene.children.compactMap { $0 as? PetNode }.isEmpty)
     }
+
+    func test_previewInstalledPet_shiftsExistingRealPetSideways() {
+        // One real pet on screen sits dead-center. Dropping in an install
+        // preview must trigger the same reposition rule that a second
+        // session would: the existing pet animates left into its slot-0
+        // column and the preview snaps into slot-1.
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let session = Session(agent: .claudeCode, sessionKey: "k1",
+                              project: project, startedAt: Date())
+        director.addOrUpdate(session: session)
+
+        director.previewInstalledPet(pack, duration: 5)
+
+        let pets = director.scene.children.compactMap { $0 as? PetNode }
+        let realPet = pets.first { $0.sessionKey == "k1" }!
+        let previewPet = pets.first { $0.sessionKey == "install-preview-sample-pet" }!
+        XCTAssertEqual(realPet.layoutTargetPosition.x, 196, accuracy: 0.001,
+                       "existing pet must shift left to make room for the preview")
+        XCTAssertEqual(previewPet.layoutTargetPosition.x, 404, accuracy: 0.001,
+                       "preview pet must land in the right-hand slot of the recentered row")
+        XCTAssertTrue(realPet.hasLayoutMovement,
+                      "existing pet must animate to its new position, not snap")
+    }
+
+    func test_previewInstalledPet_zeroDurationRecentersRemainingPet() {
+        // After the preview's lifecycle ends, the row must collapse back to
+        // a single pet at scene center — i.e. removal of the preview also
+        // honours the reposition rule.
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let session = Session(agent: .claudeCode, sessionKey: "k1",
+                              project: project, startedAt: Date())
+        director.addOrUpdate(session: session)
+
+        director.previewInstalledPet(pack, duration: 0)
+
+        let realPet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        XCTAssertEqual(realPet.sessionKey, "k1")
+        XCTAssertEqual(realPet.layoutTargetPosition.x, 300, accuracy: 0.001,
+                       "after the preview is torn down the surviving pet must slide back to center")
+    }
+
+    func test_remove_recentersPreviewWhenLastRealPetGoesAway() {
+        // A preview pet sharing the row with a real pet must re-center when
+        // the real pet's session disappears.
+        let pack = validPack()
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": pack],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let session = Session(agent: .claudeCode, sessionKey: "k1",
+                              project: project, startedAt: Date())
+        director.addOrUpdate(session: session)
+        director.previewInstalledPet(pack, duration: 5)
+
+        director.remove(sessionKey: "k1")
+
+        let preview = director.scene.children.compactMap { $0 as? PetNode }.first!
+        XCTAssertEqual(preview.sessionKey, "install-preview-sample-pet")
+        XCTAssertEqual(preview.layoutTargetPosition.x, 300, accuracy: 0.001,
+                       "removing the only real pet must recenter the surviving preview")
+    }
 }

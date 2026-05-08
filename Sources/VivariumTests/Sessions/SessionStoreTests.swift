@@ -232,7 +232,7 @@ final class SessionStoreTests: XCTestCase {
 
         let snap = await store.snapshot()
         XCTAssertEqual(snap.first?.state, .running)
-        XCTAssertEqual(snap.first?.lastBalloon?.text, "git")
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
     }
 
     func test_promptSubmit_setsReviewAndThinkingBalloon() async {

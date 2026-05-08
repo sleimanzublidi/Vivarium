@@ -147,15 +147,21 @@ final class SceneDirector {
                            pack: pack,
                            library: library,
                            petScale: petScale)
-        let placement = previewPlacement(for: packID)
-        node.position = placement.position
         node.zPosition = 50
+        // Park the preview at scene center until the layout pass picks its X.
+        // For the no-slot fallback (row already full) this is also the final
+        // position.
+        node.position = CGPoint(x: scene.size.width / 2, y: groundY)
         scene.addChild(node)
         previewNodes[packID] = node
         previewTokens[packID] = token
-        if let slot = placement.slot {
+        if let slot = firstFreeSlot(capacity: maxVisiblePets) {
             previewSlots[packID] = slot
         }
+
+        // Re-center the row with the preview included: existing real pets
+        // animate sideways to make room, the new preview snaps to its slot.
+        applyCenteredLayout(newlySpawnedKeys: [node.sessionKey])
 
         node.play(state: .waving)
         node.balloon.present(header: "New pet installed",
@@ -223,6 +229,22 @@ final class SceneDirector {
         node.playSpawnGreeting(then: session.state)
     }
 
+    /// Lowest free slot index across both real pets and active install
+    /// previews, so a freshly spawned real pet doesn't collide with a slot
+    /// that's currently occupied by a preview pet.
+    private func firstFreeSlot(capacity: Int? = nil) -> Int? {
+        let used = Set(slotForSession.values).union(previewSlots.values)
+        var slot = 0
+        while used.contains(slot) { slot += 1 }
+        if let capacity, slot >= capacity { return nil }
+        return slot
+    }
+
+    /// Convenience for `firstFreeSlot(capacity:)` with no cap. Real-pet
+    /// spawns are bounded by `maxVisiblePets` upstream in `reconcileVisibility`,
+    /// so we don't cap here.
+    private func firstFreeSlot() -> Int { firstFreeSlot(capacity: nil)! }
+
     private func despawn(sessionKey: String) {
         guard let node = nodes.removeValue(forKey: sessionKey) else { return }
         slotForSession.removeValue(forKey: sessionKey)
@@ -232,31 +254,41 @@ final class SceneDirector {
         node.removeFromParent()
     }
 
-    private func firstFreeSlot() -> Int {
-        let used = Set(slotForSession.values)
-        var slot = 0
-        while used.contains(slot) { slot += 1 }
-        return slot
-    }
-
+    /// Re-center the row of visible pets — both real session pets and any
+    /// active install-preview pets — around the scene's horizontal center.
+    /// Pets are ordered by slot so a removed pet's column stays empty until
+    /// reused, preserving the order users see during transitions. Newly
+    /// added pets snap to their target X; pets already on screen animate
+    /// sideways via `moveToLayoutPosition`.
     private func applyCenteredLayout(newlySpawnedKeys: Set<String>) {
-        let ordered = nodes.keys.sorted {
-            let lhsSlot = slotForSession[$0] ?? Int.max
-            let rhsSlot = slotForSession[$1] ?? Int.max
-            if lhsSlot != rhsSlot { return lhsSlot < rhsSlot }
-            return $0 < $1
+        struct Entry { let key: String; let node: PetNode; let slot: Int }
+        var entries: [Entry] = []
+        for (key, node) in nodes {
+            entries.append(Entry(key: key,
+                                 node: node,
+                                 slot: slotForSession[key] ?? Int.max))
+        }
+        // Only previews that hold a slot participate in the centered row;
+        // a no-slot preview (row already full) sits at scene center as a
+        // fallback and isn't part of the layout.
+        for (packID, node) in previewNodes {
+            guard let slot = previewSlots[packID] else { continue }
+            entries.append(Entry(key: node.sessionKey, node: node, slot: slot))
+        }
+        let ordered = entries.sorted {
+            if $0.slot != $1.slot { return $0.slot < $1.slot }
+            return $0.key < $1.key
         }
 
-        for (index, key) in ordered.enumerated() {
-            guard let node = nodes[key] else { continue }
+        for (index, entry) in ordered.enumerated() {
             let target = position(forCenteredIndex: index, count: ordered.count)
-            let steadyState = sessions[key]?.state ?? node.currentState
-            if newlySpawnedKeys.contains(key) {
-                node.moveToLayoutPosition(target, steadyState: steadyState, animated: false)
+            let steadyState = sessions[entry.key]?.state ?? entry.node.currentState
+            if newlySpawnedKeys.contains(entry.key) {
+                entry.node.moveToLayoutPosition(target, steadyState: steadyState, animated: false)
             } else {
-                node.moveToLayoutPosition(target,
-                                          steadyState: steadyState,
-                                          duration: layoutAnimationDuration)
+                entry.node.moveToLayoutPosition(target,
+                                                steadyState: steadyState,
+                                                duration: layoutAnimationDuration)
             }
         }
     }
@@ -267,21 +299,17 @@ final class SceneDirector {
         return CGPoint(x: x, y: groundY)
     }
 
-    private func previewPlacement(for packID: String) -> (position: CGPoint, slot: Int?) {
-        let usedSlots = Set(slotForSession.values).union(previewSlots.values)
-        if let slot = (0..<maxVisiblePets).first(where: { !usedSlots.contains($0) }) {
-            let occupiedSlots = usedSlots.union([slot]).sorted()
-            let count = occupiedSlots.count
-            let index = occupiedSlots.firstIndex(of: slot) ?? count - 1
-            return (position(forCenteredIndex: index, count: count), slot)
-        }
-        return (CGPoint(x: scene.size.width / 2, y: groundY), nil)
-    }
-
     private func removePreview(packID: String) {
-        previewNodes.removeValue(forKey: packID)?.removeFromParent()
-        previewSlots.removeValue(forKey: packID)
+        let removedNode = previewNodes.removeValue(forKey: packID)
+        let releasedSlot = previewSlots.removeValue(forKey: packID)
         previewTokens.removeValue(forKey: packID)
+        removedNode?.removeFromParent()
+        // Skip the relayout if there was nothing to remove (idempotent calls
+        // from `previewInstalledPet`'s replace path are common). Otherwise
+        // re-center so survivors slide back to fill the gap.
+        if removedNode != nil || releasedSlot != nil {
+            applyCenteredLayout(newlySpawnedKeys: [])
+        }
     }
 
     // MARK: - Balloons

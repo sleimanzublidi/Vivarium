@@ -19,7 +19,7 @@ enum ToolDisplayName {
         if isShellTool(toolName),
            let command = detail,
            let summary = shellCommandSummary(from: command) {
-            return "\(toolName)(\(summary))" 
+            return "\(toolName)(\(summary))"
         }
 
         if let mapped = mapping[toolName.lowercased()] {

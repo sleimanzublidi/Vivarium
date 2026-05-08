@@ -25,14 +25,14 @@ final class ToolDisplayNameTests: XCTestCase {
     }
 
     func test_shellTool_withCommandDetailShowsExecutable() {
-        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "git status --short"), "git")
-        XCTAssertEqual(ToolDisplayName.display(for: "bash", detail: "go test ./..."), "go")
-        XCTAssertEqual(ToolDisplayName.display(for: "shell", detail: "/usr/bin/swift test"), "swift")
+        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "git status --short"), "Bash(git)")
+        XCTAssertEqual(ToolDisplayName.display(for: "bash", detail: "go test ./..."), "bash(go)")
+        XCTAssertEqual(ToolDisplayName.display(for: "shell", detail: "/usr/bin/swift test"), "shell(swift)")
     }
 
     func test_shellTool_skipsCommonWrappersAndEnvironmentAssignments() {
-        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "FOO=bar sudo -n git status"), "git")
-        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "env CI=1 command make test"), "make")
+        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "FOO=bar sudo -n git status"), "Bash(git)")
+        XCTAssertEqual(ToolDisplayName.display(for: "Bash", detail: "env CI=1 command make test"), "Bash(make)")
     }
 
     func test_shellTool_withoutCommandDetailFallsBackToToolNameMapping() {
