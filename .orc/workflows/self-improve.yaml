@@ -1,0 +1,81 @@
+# Self-improvement workflow — generates product and engineering ideas, debates them,
+# implements the best, validates the binary, then runs a review-fix loop, and commits.
+#
+# Usage:
+#   orc start self-improve
+name: self-improve
+description: Autonomous self-improvement cycle that generates product and engineering ideas, debates and ranks them, implements the top picks, validates the tool, runs iterative code review, and commits.
+
+nodes:
+  - id: setup
+    command: |
+      BRANCH="self-improve/$(date +%Y-%m-%d)"
+      git checkout -b "$BRANCH" >/dev/null 2>&1 || git checkout "$BRANCH" >/dev/null 2>&1
+      mkdir -p {{orc_root}}/self-improve >/dev/null 2>&1
+      date '+%Y%m%d-%H%M%S'
+    output: timestamp
+
+  - id: codebase-summary
+    agent: claude-code
+    depends_on: setup
+    prompt_file: "{{orc_root}}/prompts/codebase-summary.md"
+    output: codebase_summary
+
+  - id: product-manager
+    agent: claude-code
+    depends_on: codebase-summary
+    prompt_file: "{{orc_root}}/prompts/product-manager.md"
+    output: product_ideas_file
+
+  - id: principal-engineer
+    agent: claude-code
+    depends_on: codebase-summary
+    prompt_file: "{{orc_root}}/prompts/principal-engineer.md"
+    output: engineer_ideas_file
+
+  - id: adversarial-reviewer
+    agent: claude-code
+    depends_on:
+      - product-manager
+      - principal-engineer
+    prompt_file: "{{orc_root}}/prompts/adversarial-reviewer.md"
+    output: tasks_file
+
+  - id: software-engineer
+    workflow: .orc/workflows/implement-task.yaml
+    depends_on: adversarial-reviewer
+    on_failure: continue
+    inputs:
+      task_file: "{{tasks_file}}"
+
+  - id: tool-validation
+    workflow: .orc/workflows/tool-validation.yaml
+    depends_on: software-engineer
+    when: "{{software-engineer.status}} == 'completed'"
+
+  - id: fix-loop
+    workflow: .orc/workflows/fix-loop.yaml
+    depends_on: tool-validation
+    when: "{{tool-validation.status}} == 'completed'"
+    inputs:
+      workspace: "{{workspace}}"
+
+  - id: commit
+    agent: shell
+    depends_on: fix-loop
+    command: |
+      git add -A && git commit -m "[Claude] Self-improve: $(date +%Y-%m-%d)
+
+      Automated self-improvement cycle — implementation validated and reviewed.
+
+      Co-Authored-By: Claude"
+    output: commit_result
+
+output:
+  product_ideas: "{{product_ideas_file}}"
+  engineer_ideas: "{{engineer_ideas_file}}"
+  tasks: "{{tasks_file}}"
+  implementation: "{{software-engineer.output}}"
+  validation: "{{tool-validation.output}}"
+  review: "{{fix-loop.output}}"
+  commit: "{{commit_result}}"

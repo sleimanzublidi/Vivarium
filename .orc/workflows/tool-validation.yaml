@@ -1,0 +1,37 @@
+# Tool validation workflow — builds the binary, then runs validate.sh in a loop.
+# If validation fails, a fixer agent reads the output and patches the code.
+# Repeats until validate.sh passes or max iterations reached.
+#
+# Usage:
+#   orc start tool-validation
+name: tool-validation
+description: Build and validate the orc binary via smoke tests. Loops fix attempts until validation passes.
+
+nodes:
+  - id: build
+    agent: shell
+    command: "bash Scripts/build.sh"
+    output: build_result
+
+  - id: validate-fix
+    agent: claude-code
+    depends_on: build
+    prompt: |
+      The validate.sh smoke-test script failed. Here is the output from the last run:
+
+      ```
+      {{last_output | default: (first run — no previous output)}}
+      ```
+
+      1. Run `bash Scripts/validate.sh` yourself to reproduce the failures.
+      2. Read the failing assertion(s) and trace them back to the orc source code.
+      3. Fix the root cause in the Swift source — do NOT weaken assertions or edit validate.sh.
+      4. Rebuild with `bash Scripts/build.sh`.
+      5. Re-run `bash Scripts/validate.sh` to confirm your fix. Output the full validate.sh output.
+    output: fix_result
+    loop:
+      until: validate_tool
+      max_iterations: 5
+
+output:
+  result: "{{fix_result}}"

@@ -6,6 +6,7 @@ Icon?
 
 # Brainstorming companion (skill state)
 .superpowers/
+superpowers/
 
 # Xcode
 build/
@@ -56,3 +57,13 @@ fastlane/test_output
 # Logs / scratch
 *.log
 *.tmp
+
+# Worktrees
+.worktrees/
+
+# Orc
+.orc/*
+!.orc/evaluators/
+!.orc/prompts/
+!.orc/workflows/
+Orc/.claude/settings.local.json

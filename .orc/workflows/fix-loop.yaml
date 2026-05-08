@@ -1,0 +1,23 @@
+# Iterative code review loop — reviews changes, then fixes issues, repeats until clean.
+#
+# Each iteration runs review-and-fix (reviewer finds issues, fixer addresses them).
+# Stops when the reviewer outputs APPROVED or after 3 iterations.
+#
+# Usage:
+#   orc start fix-loop
+name: fix-loop
+description: Two-phase review and fix loop — reviewer outputs findings, fixer addresses them. Repeats until clean.
+
+nodes:
+  - id: review-fix
+    workflow: .orc/workflows/review-and-fix.yaml
+    inputs:
+      review_file: "{{last_output | default: }}"
+    output: review_result
+    loop:
+      until: approved
+      max_iterations: 3
+      fresh_context: true
+
+output:
+  review: "{{review_result}}"

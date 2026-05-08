@@ -1,0 +1,23 @@
+# Single review-then-fix pass. Called by fix-loop as a nested workflow.
+#
+# The reviewer outputs a review file path (or "APPROVED" if clean).
+# The fixer reads the review file and addresses each finding.
+name: review-and-fix
+description: Single pass — reviewer finds issues, fixer addresses them.
+
+nodes:
+  - id: reviewer
+    agent: claude-code
+    prompt_file: "{{orc_root}}/prompts/code-reviwer.md"
+    output: review_output
+
+  - id: fixer
+    agent: claude-code
+    prompt_file: "{{orc_root}}/prompts/code-fixer.md"
+    depends_on: [reviewer]
+    when: "{{reviewer.status}} == 'completed' && {{review_output}} != 'APPROVED'"
+    output: fix_result
+
+output:
+  review: "{{review_output}}"
+  result: "{{fix_result | default: APPROVED}}"

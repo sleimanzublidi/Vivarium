@@ -1,0 +1,20 @@
+# Implement a task from a task file — plan, code, build, test, commit.
+#
+# Usage:
+#   orc start implement-task --input task_file=".orc/self-improve/tasks-20260411-110827-1.md"
+name: implement-task
+description: Plans and implements a single task from a task file, then builds, tests, and commits.
+
+input:
+  - name: task_file
+    type: file
+    required: true
+
+nodes:
+  - id: implement
+    agent: claude-code
+    prompt_file: "{{orc_root}}/prompts/implement-task.md"
+    output: result
+
+output:
+  implementation: "{{result}}"
