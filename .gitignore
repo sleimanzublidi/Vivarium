@@ -65,8 +65,13 @@ fastlane/test_output
 .orc/*
 !.orc/evaluators/
 !.orc/prompts/
+!.orc/self-improve/
+.orc/self-improve/*
+!.orc/self-improve/ideas-backlog.md
+!.orc/self-improve/known-issues.md
 !.orc/workflows/
-Orc/.claude/settings.local.json
 
-# Locks
-*.lock
+# Claude
+CLAUDE.local.md
+.claude/scheduled_tasks.lock
+.claude/skills/settings.local.json
