@@ -365,24 +365,37 @@ final class SceneDirector {
 
     /// Order overlapping balloons so the most-recent one stays prominent
     /// without pushing siblings around. Every balloon stays at its natural
-    /// Y; the newest renders at full alpha and the highest z, and older
-    /// ones dim to `balloonDimmedAlpha` and step down in z so they paint
-    /// behind newer neighbours where the bubbles overlap.
+    /// Y. zPosition steps down strictly by recency so any z-driven
+    /// painting order is deterministic. Alpha, however, is governed by
+    /// *actual* scene-space overlap with a newer balloon: a balloon that
+    /// shares no pixels with any newer one stays at full alpha (multiple
+    /// agents talking at once but spaced apart shouldn't all dim to 0.3 —
+    /// only the ones genuinely competing for the same screen real estate
+    /// should recede).
     private func restackBalloons() {
         struct Entry {
             let date: Date
             let key: String
             let petNode: PetNode
+            let sceneRect: CGRect
         }
         var entries: [Entry] = []
         for (key, petNode) in nodes {
             guard !petNode.balloon.isHidden,
-                  petNode.balloon.lastBubbleRect != nil,
+                  let local = petNode.balloon.lastBubbleRect,
                   let date = lastBalloonShownAt[key]
             else { continue }
+            // Balloon is a child of the pet; `lastBubbleRect` is in
+            // pet-local coordinates. Scene-space rect = layoutTargetPosition
+            // + bubbleRect. Using `layoutTargetPosition` (vs. live `position`)
+            // keeps overlap detection stable across move animations.
+            let origin = CGPoint(x: petNode.layoutTargetPosition.x + local.minX,
+                                 y: petNode.layoutTargetPosition.y + local.minY)
+            let sceneRect = CGRect(origin: origin, size: local.size)
             entries.append(Entry(date: date,
                                  key: petNode.sessionKey,
-                                 petNode: petNode))
+                                 petNode: petNode,
+                                 sceneRect: sceneRect))
         }
         // Newest first; sessionKey breaks ties so layout is deterministic
         // when two balloons share a postedAt timestamp.
@@ -391,14 +404,17 @@ final class SceneDirector {
             return $0.key < $1.key
         }
 
+        var newerRects: [CGRect] = []
         for (idx, entry) in sorted.enumerated() {
-            let alpha: CGFloat = idx == 0 ? 1.0 : Self.balloonDimmedAlpha
+            let overlapsNewer = newerRects.contains { $0.intersects(entry.sceneRect) }
+            let alpha: CGFloat = overlapsNewer ? Self.balloonDimmedAlpha : 1.0
             let z: CGFloat = idx == 0
                 ? Self.balloonNewestZ
                 : Self.balloonNewestZ - 1 - CGFloat(idx)
             entry.petNode.balloon.setStackLayout(verticalShift: 0,
                                                  targetAlpha: alpha,
                                                  zPosition: z)
+            newerRects.append(entry.sceneRect)
         }
     }
 

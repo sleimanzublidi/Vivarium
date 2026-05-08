@@ -288,6 +288,37 @@ final class SceneDirectorTests: XCTestCase {
                        "removing the only real pet must recenter the surviving preview")
     }
 
+    /// Multiple balloons that don't share any pixels stay at full alpha —
+    /// dimming is reserved for actual visual competition. With a wide
+    /// `petGap`, the row spreads pets far enough apart that their bubbles
+    /// don't overlap, and the older balloon should *not* be dimmed.
+    func test_restack_doesNotDimNonOverlappingBalloons() {
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": validPack()],
+                                     sceneSize: CGSize(width: 1200, height: 200),
+                                     petScale: 1.0,
+                                     petGap: 200)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "repo", petId: "sample-pet")
+        let t = Date()
+        var s1 = Session(agent: .claudeCode, sessionKey: "k1",
+                         project: project, startedAt: t)
+        s1.state = .waiting
+        s1.lastBalloon = BalloonText(text: "older", postedAt: t)
+        var s2 = Session(agent: .claudeCode, sessionKey: "k2",
+                         project: project, startedAt: t.addingTimeInterval(1))
+        s2.state = .waiting
+        s2.lastBalloon = BalloonText(text: "newer", postedAt: t.addingTimeInterval(1))
+
+        director.addOrUpdate(session: s1)
+        director.addOrUpdate(session: s2)
+
+        let older = director.scene.children.compactMap { $0 as? PetNode }
+            .first { $0.sessionKey == "k1" }!
+        XCTAssertEqual(older.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
+                       "non-overlapping older balloon should stay at full alpha")
+    }
+
     /// A click on a pet whose balloon was dimmed by a newer sibling
     /// must un-dim it and lift it above the newest stack member, so the
     /// user can re-read what that pet last said without waiting for new
