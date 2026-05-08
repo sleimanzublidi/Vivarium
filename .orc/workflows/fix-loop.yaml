@@ -5,18 +5,39 @@
 #
 # Usage:
 #   orc start fix-loop
+#   orc start fix-loop --input agent="copilot"
+#   orc start fix-loop --input max_iterations="5"
+#   orc start fix-loop --input worktree_path="/path/to/worktree"
+#   orc start fix-loop --input review_dir="/path/to/reviews"
 name: fix-loop
 description: Two-phase review and fix loop — reviewer outputs findings, fixer addresses them. Repeats until clean.
+
+input:
+  - name: agent
+    type: string
+    default: "claude-code"
+  - name: max_iterations
+    type: string
+    default: "3"
+  - name: worktree_path
+    type: string
+    default: "{{repo_root}}"
+  - name: review_dir
+    type: string
+    default: "{{repo_root}}/.orc/reviews"
 
 nodes:
   - id: review-fix
     workflow: .orc/workflows/review-and-fix.yaml
     inputs:
+      agent: "{{agent}}"
       review_file: "{{last_output | default: }}"
+      review_dir: "{{review_dir}}"
+      worktree_path: "{{worktree_path}}"
     output: review_result
     loop:
       until: approved
-      max_iterations: 3
+      max_iterations: "{{max_iterations}}"
       fresh_context: true
 
 output:

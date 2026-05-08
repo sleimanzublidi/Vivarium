@@ -5,15 +5,33 @@
 name: review-and-fix
 description: Single pass — reviewer finds issues, fixer addresses them.
 
+input:
+  - name: agent
+    type: string
+    default: "claude-code"
+  - name: review_file
+    type: string
+    default: ""
+  - name: review_dir
+    type: string
+    default: "{{repo_root}}/.orc/reviews"
+  - name: worktree_path
+    type: string
+    default: "{{repo_root}}"
+
 nodes:
   - id: reviewer
-    agent: claude-code
-    prompt_file: "{{orc_root}}/prompts/code-reviwer.md"
+    agent: "{{agent}}"
+    prompt_file: "{{orc_root}}/prompts/code-reviewer.md"
+    parameters:
+      permission_mode: bypassPermissions
     output: review_output
 
   - id: fixer
-    agent: claude-code
+    agent: "{{agent}}"
     prompt_file: "{{orc_root}}/prompts/code-fixer.md"
+    parameters:
+      permission_mode: bypassPermissions
     depends_on: [reviewer]
     when: "{{reviewer.status}} == 'completed' && {{review_output}} != 'APPROVED'"
     output: fix_result

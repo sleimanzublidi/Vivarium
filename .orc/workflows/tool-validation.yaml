@@ -4,34 +4,96 @@
 #
 # Usage:
 #   orc start tool-validation
+#   orc start tool-validation --input agent="copilot"
+#   orc start tool-validation --input worktree_path="/path/to/worktree"
+#   orc start tool-validation --input validation_report="/path/to/report.md"
 name: tool-validation
 description: Build and validate the orc binary via smoke tests. Loops fix attempts until validation passes.
+
+input:
+  - name: agent
+    type: string
+    default: "claude-code"
+  - name: worktree_path
+    type: string
+    default: "{{repo_root}}"
+  - name: validation_report
+    type: string
+    default: "{{repo_root}}/.orc/self-improve/validation.md"
 
 nodes:
   - id: build
     agent: shell
-    command: "bash Scripts/build.sh"
+    command: "cd {{worktree_path}} && bash Scripts/build.sh"
+    on_failure: continue
     output: build_result
 
   - id: validate-fix
-    agent: claude-code
+    agent: "{{agent}}"
     depends_on: build
+    parameters:
+      permission_mode: bypassPermissions
     prompt: |
-      The validate.sh smoke-test script failed. Here is the output from the last run:
+      The build or validate step needs to be verified. Here is the output from the last run:
 
       ```
       {{last_output | default: (first run — no previous output)}}
       ```
 
-      1. Run `bash Scripts/validate.sh` yourself to reproduce the failures.
+      Work exclusively in the git worktree at `{{worktree_path}}`.
+
+      1. Run `cd {{worktree_path}} && bash Scripts/validate.sh` yourself to reproduce the failures.
       2. Read the failing assertion(s) and trace them back to the orc source code.
       3. Fix the root cause in the Swift source — do NOT weaken assertions or edit validate.sh.
-      4. Rebuild with `bash Scripts/build.sh`.
-      5. Re-run `bash Scripts/validate.sh` to confirm your fix. Output the full validate.sh output.
+      4. Rebuild with `cd {{worktree_path}} && bash Scripts/build.sh`.
+      5. Re-run `cd {{worktree_path}} && bash Scripts/validate.sh` to confirm your fix.
+      6. When validation passes, output ONLY `APPROVED`.
     output: fix_result
     loop:
-      until: validate_tool
+      until: approved
       max_iterations: 5
 
+  - id: validation-summary
+    agent: shell
+    depends_on: validate-fix
+    command: |
+      set -eu
+      mkdir -p "$(dirname "{{validation_report}}")"
+      BUILD_LOG="$(mktemp)"
+      VALIDATE_LOG="$(mktemp)"
+      BUILD_STATUS="FAIL"
+      VALIDATE_STATUS="FAIL"
+      cd "{{worktree_path}}"
+      if bash Scripts/build.sh >"$BUILD_LOG" 2>&1; then
+        BUILD_STATUS="PASS"
+      fi
+      if [ "$BUILD_STATUS" = "PASS" ] && bash Scripts/validate.sh >"$VALIDATE_LOG" 2>&1; then
+        VALIDATE_STATUS="PASS"
+      fi
+      {
+        echo "# Validation Summary"
+        echo
+        echo "**Generated:** $(date '+%Y-%m-%d %H:%M:%S %z')"
+        echo "**Worktree:** {{worktree_path}}"
+        echo "**Build:** $BUILD_STATUS"
+        echo "**Smoke validation:** $VALIDATE_STATUS"
+        echo
+        echo "## Build Output"
+        echo '```'
+        cat "$BUILD_LOG"
+        echo '```'
+        echo
+        echo "## Validate Output"
+        echo '```'
+        cat "$VALIDATE_LOG"
+        echo '```'
+      } > "{{validation_report}}"
+      rm -f "$BUILD_LOG" "$VALIDATE_LOG"
+      if [ "$BUILD_STATUS" != "PASS" ] || [ "$VALIDATE_STATUS" != "PASS" ]; then
+        exit 1
+      fi
+      echo "{{validation_report}}"
+    output: validation_summary
+
 output:
-  result: "{{fix_result}}"
+  result: "{{validation_summary}}"

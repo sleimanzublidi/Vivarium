@@ -1,19 +1,29 @@
-# Implement a task from a task file — plan, code, build, test, commit.
+# Implement a task from a task file — plan, code, build, and test.
 #
 # Usage:
-#   orc start implement-task --input task_file=".orc/self-improve/tasks-20260411-110827-1.md"
+#   orc start implement-task --input task_file=".orc/self-improve/20260411-110827-tasks.md"
+#   orc start implement-task --input task_file=".orc/self-improve/20260411-110827-tasks.md" --input agent="copilot"
+#   orc start implement-task --input task_file=".orc/self-improve/20260411-110827-tasks.md" --input worktree_path="/path/to/worktree"
 name: implement-task
-description: Plans and implements a single task from a task file, then builds, tests, and commits.
+description: Plans and implements a single task from a task file, then builds and tests. Leaves changes uncommitted for the parent workflow.
 
 input:
+  - name: agent
+    type: string
+    default: "claude-code"
   - name: task_file
     type: file
     required: true
+  - name: worktree_path
+    type: string
+    default: "{{repo_root}}"
 
 nodes:
   - id: implement
-    agent: claude-code
+    agent: "{{agent}}"
     prompt_file: "{{orc_root}}/prompts/implement-task.md"
+    parameters:
+      permission_mode: bypassPermissions
     output: result
 
 output:
