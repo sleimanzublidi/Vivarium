@@ -67,3 +67,6 @@ fastlane/test_output
 !.orc/prompts/
 !.orc/workflows/
 Orc/.claude/settings.local.json
+
+# Locks
+*.lock
