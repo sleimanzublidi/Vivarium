@@ -141,26 +141,83 @@ nodes:
       review_dir: "{{worktree_path}}/.orc/self-improve"
       agent: "{{agent}}"
 
+  # Agent-written commit body grounded in the actual diff. Runs only on the
+  # IMPLEMENT path; for NOOP the commit node uses a fixed body. Failures here
+  # are non-fatal -- the commit node falls back to a generic message.
+  - id: commit-message
+    agent: "{{agent}}"
+    depends_on:
+      - task-decision
+      - fix-loop
+    when: "{{task_decision}} == 'IMPLEMENT' && {{fix-loop.status}} == 'completed'"
+    on_failure: continue
+    parameters:
+      permission_mode: bypassPermissions
+    prompt: |
+      Write a detailed git commit message for the changes in the worktree at `{{worktree_path}}`.
+
+      Read the task file for the original goal and rationale:
+      - {{tasks_file}}
+
+      Inspect the actual changes (this is the source of truth — ground every claim here, do not invent or infer beyond the diff):
+      - `cd {{worktree_path}} && git status`
+      - `cd {{worktree_path}} && git diff HEAD`
+
+      Write the message to `{{worktree_path}}/.orc/self-improve/{{timestamp}}-commit.txt` with exactly this structure:
+
+      ```
+      <one-line subject, under 72 chars, describing what was implemented in plain language. Do NOT include any "[Self-improve: ...]" prefix — the workflow prepends that.>
+
+      <blank line>
+
+      <body: 3-8 short bullet points or short paragraphs describing:
+        - the concrete code changes (files / behavior / new types or APIs),
+        - the user- or developer-visible effect,
+        - the motivation pulled from the task description,
+        - that build, validation, and code review passed.>
+      ```
+
+      Keep the body factual and specific (mention key files, types, or commands when useful). Do not restate the task verbatim — describe what *actually* shipped in the diff.
+
+      Output ONLY the absolute path of the saved file.
+    output: commit_message_file
+
   - id: commit
     agent: shell
     depends_on:
       - task-decision
       - fix-loop
+      - commit-message
     when: "{{task_decision}} == 'NOOP' || {{fix-loop.status}} == 'completed'"
     command: |
       set -eu
+      TIMESTAMP="{{timestamp}}"
+      MESSAGE_FILE="{{worktree_path}}/.orc/self-improve/${TIMESTAMP}-commit.txt"
       git -C "{{worktree_path}}" add -A
       if git -C "{{worktree_path}}" diff --cached --quiet; then
         echo "No changes to commit."
       else
         if [ "{{task_decision}}" = "NOOP" ]; then
-          BODY="Automated self-improvement cycle — no implementation task cleared the selection bar."
+          git -C "{{worktree_path}}" commit \
+            -m "[Self-improve: ${TIMESTAMP}]" \
+            -m "Automated self-improvement cycle — no implementation task cleared the selection bar."
+        elif [ -s "$MESSAGE_FILE" ]; then
+          # Prepend the [Self-improve: <timestamp>] tag to the agent-written
+          # subject so log filters on that prefix keep working.
+          SUBJECT_LINE="$(head -n 1 "$MESSAGE_FILE")"
+          FULL_MESSAGE_FILE="$(mktemp)"
+          {
+            printf '[Self-improve: %s] %s\n' "$TIMESTAMP" "$SUBJECT_LINE"
+            tail -n +2 "$MESSAGE_FILE"
+          } > "$FULL_MESSAGE_FILE"
+          git -C "{{worktree_path}}" commit -F "$FULL_MESSAGE_FILE"
+          rm -f "$FULL_MESSAGE_FILE"
         else
-          BODY="Automated self-improvement cycle — implementation validated and reviewed."
+          # Fallback when commit-message agent failed or produced nothing.
+          git -C "{{worktree_path}}" commit \
+            -m "[Self-improve: ${TIMESTAMP}]" \
+            -m "Automated self-improvement cycle — implementation validated and reviewed."
         fi
-        git -C "{{worktree_path}}" commit \
-          -m "[Self-improve: {{timestamp}}]" \
-          -m "$BODY"
       fi
     output: commit_result
 
@@ -202,5 +259,6 @@ output:
   implementation: "{{software-engineer.output | default: SKIPPED}}"
   validation: "{{tool-validation.output | default: SKIPPED}}"
   review: "{{fix-loop.output | default: SKIPPED}}"
+  commit_message: "{{commit_message_file | default: SKIPPED}}"
   commit: "{{commit_result | default: SKIPPED}}"
   cleanup: "{{cleanup_result | default: SKIPPED}}"
