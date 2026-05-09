@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-192729
+Last updated: 20260509-193807
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
@@ -27,7 +27,10 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
 | 14 | IDEA-011 | Move dropped pet-pack installation off the main UI path |
+| 14 | IDEA-013 | Add opt-in attention notifications |
 | 13 | IDEA-007 | `Scripts/setup.sh --uninstall` to cleanly remove Vivarium hooks |
+| 13 | IDEA-012 | Make crowded tanks inspectable |
+| 13 | IDEA-014 | Add window interference controls |
 
 ## IDEA-002
 **Title:** Post-install bridge selftest in setup.sh and notify helper
@@ -136,3 +139,39 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 **Description:** Move drag-and-drop pet pack extraction and validation off the AppKit drag callback so large zip extraction, `ditto`, and image decoding do not freeze the tank or menu bar. Keep existing validation and failure presentation behavior, but route the install through an async coordinator that performs slow filesystem/process work off the main actor and hops back to register the pack, preview it, or present an alert.
 **Rationale:** Pet packs are a user-facing extension point; if the menu-bar app blocks during installation, a normal pack drop can feel broken even when it eventually succeeds. The current path runs `PetLibrary.installPack` synchronously from `performDragOperation` and blocks on `Process.waitUntilExit()`.
 **Notes:** Separate from the rejected failure-feedback product idea: AppDelegate already presents install errors, but responsiveness during slow installs remains a real gap. Validate with an injected slow installer or equivalent seam so the drag/drop path can be proven to return promptly without depending on wall-clock zip performance.
+
+## IDEA-012
+**Title:** Make crowded tanks inspectable
+**Source:** product
+**Value:** 3
+**Feasibility:** 3
+**Safety:** 4
+**Composite:** 13
+**Status:** candidate
+**Description:** Make the `+N` overflow indicator for hidden sessions inspectable so users can see which sessions are not currently rendered, including agent, project label, and state, with a conservative path to surface or navigate to the hidden session information.
+**Rationale:** `SceneDirector` currently renders only a non-interactive `+N` label once more than `maxVisiblePets` sessions are active. The active-sessions menu already exposes a global list, so this is not a blank-slate visibility failure, but users looking directly at the tank cannot tell whether a hidden session needs attention.
+**Notes:** Upstream score reduced because the active-sessions submenu already partially addresses discoverability, and "bring a hidden session into view" needs a careful policy to avoid fighting the recency-based visibility rule. A first slice should favor showing details over changing scene ordering.
+
+## IDEA-013
+**Title:** Add opt-in attention notifications
+**Source:** product
+**Value:** 4
+**Feasibility:** 3
+**Safety:** 3
+**Composite:** 14
+**Status:** candidate
+**Description:** Add a user-facing opt-in preference that wires attention notifications for sessions entering `.waiting` or `.failed`, avoiding alerts for normal running, thinking, or idle transitions.
+**Rationale:** Vivarium is most valuable when it surfaces moments requiring user action. The codebase already has `SessionAlertCoordinator` and `SystemSessionAlertNotifier` with tests, but `AppDelegate` leaves them commented out until a notifications setting exists, so attention alerts are real but intentionally incomplete product work.
+**Notes:** Retained despite notification risk because the edge-detection scaffolding is already implemented. Implementation must be opt-in and avoid requesting notification permission on launch without user intent; validation should prove the coordinator is wired only when the preference is enabled.
+
+## IDEA-014
+**Title:** Add window interference controls
+**Source:** product
+**Value:** 3
+**Feasibility:** 4
+**Safety:** 3
+**Composite:** 13
+**Status:** candidate
+**Description:** Add simple controls for how much the tank participates in the desktop, such as disabling always-on-top behavior and providing a low-friction click-through mode when the tank covers terminal, editor, or screen-sharing content.
+**Rationale:** `FloatingTank` is always `.floating` today and handles mouse input for dragging, pet clicks, right-click menus, and zip drops. The existing opacity slider helps visual distraction but does not prevent the window from intercepting input.
+**Notes:** Keep the first implementation narrow because click-through can easily regress pet selection, zip drops, and window dragging. A safe slice could start with an always-on-top toggle before adding temporary click-through behavior.
