@@ -59,7 +59,7 @@ nodes:
       WORKTREE="$(dirname "{{repo_root}}")/${REPO_NAME}-self-improve-{{timestamp}}"
       # Redirect git's stdout ("HEAD is now at <sha> <subject>") to stderr
       # so that the only thing this node emits on stdout is the worktree
-      # path captured in {{worktree_path}}.
+      # path captured by output: worktree_path.
       git worktree add -b "$BRANCH" "$WORKTREE" HEAD >&2
       mkdir -p "$WORKTREE/.orc/self-improve"
       cp -R "{{orc_root}}/self-improve/." "$WORKTREE/.orc/self-improve/"
