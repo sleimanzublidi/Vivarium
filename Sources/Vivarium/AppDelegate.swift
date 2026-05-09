@@ -6,7 +6,7 @@ import SpriteKit
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.vivarium.Vivarium",
                             category: "AppDelegate")
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var server: SocketServer!
     private var store: SessionStore!
     private var director: SceneDirector!
@@ -38,6 +38,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let userPetsDir: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".vivarium/pets")
+    }()
+    private let claudeSettingsURL: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/settings.json")
+    }()
+    private let copilotSettingsURL: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".copilot/settings.json")
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -146,6 +154,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image?.isTemplate = true
         }
         let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        rebuildStatusItemMenu(menu)
+        item.menu = menu
+        self.statusItem = item
+    }
+
+    /// Re-read the on-disk hook settings files and rebuild the menu bar
+    /// menu in place. Called from `installMenuBarItem` for the initial
+    /// build and from `menuNeedsUpdate(_:)` every time the user opens the
+    /// menu so the status reflects current truth without polling.
+    ///
+    /// The agent settings files are tiny (a few KB) and live on a fast
+    /// local path — synchronous I/O on the main thread is fine here.
+    private func rebuildStatusItemMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let claudeStatus = HookInstallationProbe.probe(agent: .claudeCode,
+                                                       settingsURL: claudeSettingsURL)
+        let copilotStatus = HookInstallationProbe.probe(agent: .copilotCli,
+                                                        settingsURL: copilotSettingsURL)
+
+        let claudeItem = NSMenuItem(title: "Claude Code hooks: \(claudeStatus.menuLabel)",
+                                    action: nil, keyEquivalent: "")
+        claudeItem.isEnabled = false
+        claudeItem.toolTip = claudeSettingsURL.path
+        menu.addItem(claudeItem)
+
+        let copilotItem = NSMenuItem(title: "Copilot CLI hooks: \(copilotStatus.menuLabel)",
+                                     action: nil, keyEquivalent: "")
+        copilotItem.isEnabled = false
+        copilotItem.toolTip = copilotSettingsURL.path
+        menu.addItem(copilotItem)
+
+        if let hint = Self.setupHint(claude: claudeStatus, copilot: copilotStatus) {
+            let hintItem = NSMenuItem(title: hint, action: nil, keyEquivalent: "")
+            hintItem.isEnabled = false
+            menu.addItem(hintItem)
+        }
+
+        menu.addItem(.separator())
+
         let toggle = menu.addItem(withTitle: "Show / Hide Tank",
                                   action: #selector(toggleTank),
                                   keyEquivalent: "")
@@ -155,8 +205,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 action: #selector(quitApp),
                                 keyEquivalent: "q")
         quit.target = self
-        item.menu = menu
-        self.statusItem = item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        rebuildStatusItemMenu(menu)
+    }
+
+    /// Suggest the exact `Scripts/setup.sh` flag for the missing side(s).
+    /// Returns nil when both agents already have the hook installed.
+    /// `notDetected` (file missing/unreadable) is treated as "missing"
+    /// for hint purposes — the user almost certainly wants to run setup.
+    static func setupHint(claude: HookInstallationStatus,
+                          copilot: HookInstallationStatus) -> String? {
+        let claudeMissing = (claude != .installed)
+        let copilotMissing = (copilot != .installed)
+        switch (claudeMissing, copilotMissing) {
+        case (false, false): return nil
+        case (true, true):   return "Run ./Scripts/setup.sh --both to install hooks"
+        case (true, false):  return "Run ./Scripts/setup.sh --claude to install hooks"
+        case (false, true):  return "Run ./Scripts/setup.sh --copilot to install hooks"
+        }
     }
 
     @objc private func toggleTank() {

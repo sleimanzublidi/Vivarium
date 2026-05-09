@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "/opt/local/bin/some-other-tool --event sessionStart",
+        "timeoutSec": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "$HOME/.vivarium/notify --agent copilot-cli --event sessionStart",
+        "timeoutSec": 2
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "$HOME/.vivarium/notify --agent copilot-cli --event preToolUse",
+        "timeoutSec": 2
+      }
+    ]
+  }
+}

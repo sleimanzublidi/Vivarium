@@ -143,7 +143,7 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-1. Launch `Vivarium.app`. A small floating tank appears, plus a menu bar item with **Show / Hide Tank** and **Quit Vivarium**.
+1. Launch `Vivarium.app`. A small floating tank appears, plus a menu bar item showing hook installation status for Claude Code and Copilot CLI (with a `./Scripts/setup.sh --…` hint when something is missing), plus **Show / Hide Tank** and **Quit Vivarium**.
 2. Open a terminal and run `claude` or `copilot` in any project. Within a moment, a pet enters the tank from the right and starts animating in response to the session.
 3. Per-project assignments are remembered. The first session in a new project gets an unassigned pet from your library; that mapping is saved to `~/.vivarium/settings.json` and reused next time.
 4. **Right-click a pet** to swap which pet that session uses. **Left-click an idle pet** for a quick greeting.
