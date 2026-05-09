@@ -11,7 +11,9 @@ Also read repository guidance files that exist, such as AGENTS.md, CLAUDE.md, .g
 
 Treat the backlog as active candidate input. Compare unresolved backlog ideas against the newly generated ideas. Do not discard an old idea just because it is old; discard it only if it is implemented, obsolete, duplicated by a clearer new version, no longer valuable, or no longer feasible/safe.
 
-For each idea across the backlog and both new files, evaluate:
+**First pass — drop overlap with the backlog.** Before evaluating anything else, scan each idea in the two new files against the backlog. If a new idea overlaps in goal, scope, or affected surface area with an existing `IDEA-NNN` entry — even if it's framed as a "refinement", "carries forward", or "supersedes IDEA-NNN with X tweaked" — discard it. Treat the backlog entry as canonical. The upstream agents are instructed not to produce these; rejecting them here is defense in depth and should be loud (list which ideas you dropped and which `IDEA-NNN` they collided with). The only exception is a genuine **supersession**: the backlog entry is materially wrong or obsolete and the new framing replaces it cleanly. In that case, drop the old `IDEA-NNN` from the backlog and let the new idea inherit a fresh ID; do not keep both.
+
+For each remaining idea across the backlog and the two new files, evaluate:
 1. **Is it actually a problem?** — Does evidence in the codebase support this being a real issue, or is it speculative?
 2. **Is the proposed approach sound?** — Are there simpler alternatives? Does it conflict with existing design decisions?
 3. **Is it worth the effort?** — Given the project's current stage, is this a priority or a distraction?
@@ -24,7 +26,7 @@ After your analysis, score each surviving idea on three axes (1-5):
 - **Feasibility** — can it be implemented and validated autonomously in this workflow run with the information available? Do not score feasibility based on commit size or whether the final diff is small enough for one commit. Penalize ideas that require unclear product decisions, depend on external infrastructure that does not exist yet, or cannot be validated end-to-end in this run.
 - **Safety** — how unlikely is it to introduce regressions?
 
-Multiply the three scores to get a composite rank. Select the idea with the highest composite score. Break ties by preferring the safer option.
+Compute composite as `2 × Value + Feasibility + Safety` (max 20). Select the idea with the highest composite. Break ties by preferring the safer option.
 
 Minimum bar: select an implementation task only if at least one idea scores Value >= 3, Feasibility >= 3, and Safety >= 3. If no idea clears that bar, choose no task for this run. Still update the backlog with the best remaining candidates.
 

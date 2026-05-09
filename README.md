@@ -1,7 +1,4 @@
-<!-- Improved compatibility of back to top link: See: https://github.com/othneildrew/Best-README-Template/pull/73 -->
 <a id="readme-top"></a>
-
-
 
 <!-- PROJECT SHIELDS -->
 [![Contributors][contributors-shield]][contributors-url]
@@ -9,8 +6,6 @@
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
 [![project_license][license-shield]][license-url]
-
-
 
 <!-- PROJECT LOGO -->
 <br />
@@ -32,8 +27,6 @@
     <a href="https://github.com/sleimanzublidi/Vivarium/issues/new?labels=enhancement">Request Feature</a>
   </p>
 </div>
-
-
 
 <!-- TABLE OF CONTENTS -->
 <details>
@@ -61,9 +54,6 @@
   </ol>
 </details>
 
-
-
-<!-- ABOUT THE PROJECT -->
 ## About The Project
 
 Vivarium is a small floating window — "the tank" — that sits on your desktop and shows one animated pet per active coding-agent session. The pet animates based on what its session is doing (running a tool, thinking, waiting for input, erroring out) and shows a speech-balloon message when something interesting happens.
@@ -76,8 +66,6 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-
-
 ### Built With
 
 * [![Swift][Swift-shield]][Swift-url]
@@ -88,9 +76,6 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-
-
-<!-- GETTING STARTED -->
 ## Getting Started
 
 ### Prerequisites
@@ -98,14 +83,19 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
 * macOS 13 (Ventura) or later
 * Xcode 15+ with the macOS SDK and command-line tools
 * [XcodeGen](https://github.com/yonaskolb/XcodeGen) (for regenerating the Xcode project from `Sources/project.yml`)
+
   ```sh
   brew install xcodegen
   ```
+
 * [`jq`](https://jqlang.github.io/jq/) (used by `Scripts/setup` to merge hooks into agent settings)
+
   ```sh
   brew install jq
   ```
+
 * Optional: [`xcbeautify`](https://github.com/cpisciotta/xcbeautify) for nicer build output
+
   ```sh
   brew install xcbeautify
   ```
@@ -113,34 +103,39 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
 ### Installation
 
 1. Clone the repo
+
    ```sh
    git clone https://github.com/sleimanzublidi/Vivarium.git
    cd Vivarium
    ```
+
 2. Generate the Xcode project
+
    ```sh
    make regen
    ```
+
 3. Build the app
+
    ```sh
    ./Scripts/build.sh --release # Release build of Vivarium.app
    ./Scripts/build.sh --open    # …and launch it
    ```
+
    The `.app` lands at `.build/Build/Products/Release/Vivarium.app`.
 4. Install agent hooks
+
    ```sh
    ./Scripts/setup.sh --claude          # Claude Code (user-global)
    ./Scripts/setup.sh --copilot         # Copilot CLI  (user-global)
    ./Scripts/setup.sh --copilot-repo .  # Copilot CLI  (per-repo opt-in)
    ./Scripts/setup.sh --both            # both user-global
    ```
+
    The script copies a small `notify` helper to `~/.vivarium/notify` and idempotently merges hook entries into the chosen agent settings files. Existing entries owned by other tools are preserved; previous Vivarium entries are stripped and re-added on every run. Backups of any modified settings files are written alongside as `*.vivarium.bak`.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-
-
-<!-- USAGE EXAMPLES -->
 ## Usage
 
 1. Launch `Vivarium.app`. A small floating tank appears, plus a menu bar item showing hook installation status for Claude Code and Copilot CLI (with a `./Scripts/setup.sh --…` hint when something is missing), plus **Show / Hide Tank** and **Quit Vivarium**.
@@ -153,26 +148,22 @@ Set `VIVARIUM_DEBUG_GRID=1` before launching to replace the tank with a 3×3 gri
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-
-
-<!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Rich menu bar: Always-on-Top toggle, background picker, hook installer GUI, default-pet picker, project-mappings editor, active-sessions debug list, preferences pane
-- [ ] Glob-based project override editor (`~/.vivarium/projects.json`)
-- [ ] Filesystem watching for packs added/modified outside the app
-- [ ] Persistent `SessionStore` snapshots across restarts
-- [ ] Rotating logs (`notify.log`, `events.log`, `pets.log`)
-- [ ] Surface pack validation issues in the menu ("Pets → Issues (N)")
-- [ ] Click-through-on-hover for the tank
+* [ ] Rich menu bar: Always-on-Top toggle, background picker, hook installer GUI, default-pet picker, project-mappings editor, active-sessions debug list, preferences pane
+* [ ] Glob-based project override editor (`~/.vivarium/projects.json`)
+* [ ] Filesystem watching for packs added/modified outside the app
+* [ ] Persistent `SessionStore` snapshots across restarts
+* [ ] Rotating logs (`notify.log`, `events.log`, `pets.log`)
+* [ ] Surface pack validation issues in the menu ("Pets → Issues (N)")
+* [ ] Show a ballon that looks like a terminal when running bash/shell tools.
+* [ ] Detect rubber duck tools and show a thinking balloon with a duck on it.
+* [ ] Click-through-on-hover for the tank
 
 See the [open issues](https://github.com/sleimanzublidi/Vivarium/issues) for a full list of proposed features (and known issues).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-
-
-<!-- CONTRIBUTING -->
 ## Contributing
 
 Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
@@ -187,15 +178,12 @@ If you have a suggestion that would make this better, please fork the repo and c
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Top contributors:
+### Top contributors
 
 <a href="https://github.com/sleimanzublidi/Vivarium/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=sleimanzublidi/Vivarium" alt="contrib.rocks image" />
 </a>
 
-
-
-<!-- LICENSE -->
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
@@ -212,8 +200,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 * [Best-README-Template](https://github.com/othneildrew/Best-README-Template) — README scaffolding.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
 
 <!-- MARKDOWN LINKS & IMAGES -->
 [contributors-shield]: https://img.shields.io/github/contributors/sleimanzublidi/Vivarium.svg?style=for-the-badge

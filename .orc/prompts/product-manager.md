@@ -8,11 +8,18 @@ Here is a codebase summary prepared by a prior agent — use it instead of explo
 
 Read `{{worktree_path}}/.orc/self-improve/ideas-backlog.md` and `git log main..HEAD --oneline` before proposing ideas.
 
-Treat `ideas-backlog.md` as the curated source of unresolved candidate ideas. Do not scan or reprocess old timestamped files in `{{worktree_path}}/.orc/self-improve/` as active candidate input; those files are historical artifacts for audit/debugging only.
+Treat `ideas-backlog.md` as a **STRICT exclusion list**. Do not propose any idea that overlaps in goal, scope, or affected surface area with an existing `IDEA-NNN` entry — not as a duplicate, not as a "refinement", not as a "carries forward", not as a "supersedes IDEA-NNN with X tweaked". If you find yourself writing any phrase of the form "Refines IDEA-NNN" / "Carries backlog IDEA-NNN forward" / "Backlog IDEA-NNN with [tweak]", stop and discard the idea — that is the wrong output. Refinements to existing backlog entries are the adversarial-reviewer's job in a later step, not yours.
 
-The backlog is a source of unresolved candidate ideas, not just a deduplication list. Do not re-propose exact duplicates, but you may refine, split, merge, or supersede backlog ideas when the new version is materially clearer, safer, or more valuable. If you carry a backlog idea forward, make the refinement explicit in the rationale.
+Your job is to surface **NEW work** — gaps, regressions, roadmap items, or opportunities the backlog has not yet captured. If the codebase honestly does not have `{{idea_count}}` distinct new ideas worth proposing right now, output fewer (or zero). A short, high-signal file beats a padded one that restates the backlog.
 
-Look for repository planning and backlog documents that exist, such as README.md, ROADMAP.md, TODO.md, BACKLOG.md, CHANGELOG.md, docs/roadmap.md, docs/backlog.md, or docs/specs. Read the relevant sections and use them as idea sources. Prefer ideas that advance, unblock, refine, or safely reduce risk around explicitly planned work.
+Do not scan or reprocess old timestamped files in `{{worktree_path}}/.orc/self-improve/` as candidate input; those are historical artifacts for audit/debugging only.
+
+**You do not read source code.** Your inputs are the codebase summary above plus user-facing surfaces only:
+- README.md, install/setup scripts visible to the user (`Scripts/setup.sh` flow descriptions, not the script's internals), error messages and user-facing copy strings, screenshots if present.
+- Stated intent: ROADMAP.md, docs/SPEC.md, CHANGELOG.md, TODO.md, BACKLOG.md, docs/roadmap.md, docs/backlog.md, docs/specs/*. Read these for context, but do NOT pad ideas with "the roadmap says do X" — a roadmap entry is an idea source only when you can also articulate the user friction it solves.
+- Menu items, status surfaces, and UX behaviors described in the codebase summary.
+
+Do not open `Sources/`, `*.swift`, `*.h`, build scripts, or test files. If you need an internal detail you don't have, that's a sign the idea is implementation-shaped and belongs to the principal engineer, not you.
 
 Produce a top {{idea_count}} ranked set of product ideas for this run. Focus on user-visible outcomes:
 - First-run success, onboarding, and setup confidence
@@ -21,7 +28,7 @@ Produce a top {{idea_count}} ranked set of product ideas for this run. Focus on 
 - Reducing user confusion, failed workflows, or unclear recovery paths
 - Error messages, user guidance, and documentation gaps from a user perspective
 
-Describe the user problem, desired behavior, and why it matters. Do not prescribe internal implementation or refactoring unless it is necessary to explain the user-facing outcome.
+Describe the user problem, desired behavior, and why it matters. **Do not include file paths, line numbers, type names, function names, or internal API references in your descriptions** — those are implementation details and they make your ideas impossible to evaluate as product proposals. If your description requires "see `AppDelegate.swift:46`" or "use the `PetLibrary.discoverAll` enum" to make sense, the idea is engineering work in disguise; drop it.
 
 Score each idea using the shared backlog model:
 - **Value:** user-facing product impact or ability to unblock high-value user-facing work
