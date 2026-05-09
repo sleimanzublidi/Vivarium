@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-193807
+Last updated: 20260509-194814
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
@@ -11,7 +11,7 @@ Each idea is scored from 1 to 5 on:
 - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
 - **Safety:** likelihood the change can be made without regressions.
 
-Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the primary driver; feasibility and safety act as gates.
+Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the rubric's primary driver — feasibility and safety are gates rather than goals.
 
 Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes.
 
@@ -24,7 +24,9 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 | 16 | IDEA-008 | Detect pet packs added outside the app |
 | 16 | IDEA-009 | Explain agent capability differences in product |
 | 16 | IDEA-010 | Quarantine corrupt global settings before writing defaults |
+| 16 | IDEA-016 | Show active helper-agent activity on pets |
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
+| 15 | IDEA-015 | Let users dismiss stale pets |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
 | 14 | IDEA-011 | Move dropped pet-pack installation off the main UI path |
 | 14 | IDEA-013 | Add opt-in attention notifications |
@@ -175,3 +177,27 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 **Description:** Add simple controls for how much the tank participates in the desktop, such as disabling always-on-top behavior and providing a low-friction click-through mode when the tank covers terminal, editor, or screen-sharing content.
 **Rationale:** `FloatingTank` is always `.floating` today and handles mouse input for dragging, pet clicks, right-click menus, and zip drops. The existing opacity slider helps visual distraction but does not prevent the window from intercepting input.
 **Notes:** Keep the first implementation narrow because click-through can easily regress pet selection, zip drops, and window dragging. A safe slice could start with an always-on-top toggle before adding temporary click-through behavior.
+
+## IDEA-015
+**Title:** Let users dismiss stale pets
+**Source:** product
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 3
+**Composite:** 15
+**Status:** candidate
+**Description:** Add a direct way to remove a pet when its underlying agent session is no longer useful to watch. A right-click action on a pet, plus a conservative menu action for clearing stale or idle sessions, would let users recover from missed end events, crashed terminals, or attention states they have already handled without quitting the app.
+**Rationale:** The tank is only trustworthy if what it shows feels current. When a pet lingers after the real work is over, users have to wait for cleanup or restart Vivarium, which makes the product feel unreliable. A manual dismissal path gives users safe control over a common recovery moment while preserving automatic session tracking.
+**Notes:** Retained after strict backlog-overlap review because no existing IDEA covers manual session dismissal. Safety is reduced from the upstream proposal because a too-broad action could hide still-active work; a safe first slice should be explicit, per-session, and avoid changing automatic session-end or eviction behavior.
+
+## IDEA-016
+**Title:** Show active helper-agent activity on pets
+**Source:** product
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 16
+**Status:** candidate
+**Description:** When an agent has helper work active in the background, show a small visual badge or stacked indicator on that session's pet, clearing it when helper activity finishes. The indicator should be subtle, readable at tank size, and avoid changing the pet's main state animation.
+**Rationale:** Users can currently see that an agent is running, waiting, or failing, but not whether visible work represents a single turn or delegated background activity. `Session.subagentDepth` is already tracked and the state-mapping docs explicitly reserve it for a future visual badge, so this turns captured signal into an understandable product cue.
+**Notes:** Retained as distinct from IDEA-009: that entry explains agent capability differences, while this changes Claude helper activity rendering. Keep the first slice render-only and driven by existing `subagentDepth` so Copilot sessions, which do not expose subagent events, remain unchanged.
