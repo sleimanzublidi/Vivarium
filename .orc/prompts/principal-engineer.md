@@ -14,7 +14,7 @@ The backlog is a source of unresolved candidate ideas, not just a deduplication 
 
 Look for repository planning and backlog documents that exist, such as README.md, ROADMAP.md, TODO.md, BACKLOG.md, CHANGELOG.md, docs/roadmap.md, docs/backlog.md, or docs/specs. Read the relevant sections and use them as idea sources. Prefer ideas that advance, unblock, refine, or safely reduce risk around explicitly planned work.
 
-Produce a top 3 ranked set of engineering ideas for this run. Focus on technical changes that improve user outcomes or make future autonomous improvements safer:
+Produce a top {{idea_count}} ranked set of engineering ideas for this run. Focus on technical changes that improve user outcomes or make future autonomous improvements safer:
 - Reliability and correctness issues users can hit
 - Validation, testability, and diagnostics gaps that make autonomous changes safer
 - Performance opportunities that are measurable and user-visible; include a baseline estimate (e.g., "current: ~2s, expected: ~0.5s") and how to measure it

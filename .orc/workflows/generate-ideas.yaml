@@ -13,6 +13,9 @@ input:
   - name: agent
     type: string
     default: "claude-code"
+  - name: idea_count
+    type: string
+    default: "3"
 
 nodes:
   - id: setup

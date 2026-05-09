@@ -14,7 +14,7 @@ The backlog is a source of unresolved candidate ideas, not just a deduplication 
 
 Look for repository planning and backlog documents that exist, such as README.md, ROADMAP.md, TODO.md, BACKLOG.md, CHANGELOG.md, docs/roadmap.md, docs/backlog.md, or docs/specs. Read the relevant sections and use them as idea sources. Prefer ideas that advance, unblock, refine, or safely reduce risk around explicitly planned work.
 
-Produce a top 3 ranked set of product ideas for this run. Focus on user-visible outcomes:
+Produce a top {{idea_count}} ranked set of product ideas for this run. Focus on user-visible outcomes:
 - First-run success, onboarding, and setup confidence
 - Missing capabilities that make the product more useful
 - Workflow authoring ergonomics, discoverability, and integrations
