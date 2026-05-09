@@ -18,6 +18,7 @@ actor SessionStore {
     private var idleTimers: [String: Task<Void, Never>] = [:]
     private var temporaryStateTimers: [String: Task<Void, Never>] = [:]
     private var temporaryFallbackStates: [String: PetState] = [:]
+    private var activeToolStartCounts: [String: [String: Int]] = [:]
     private var processSessionKeysByPID: [Int: ProcessSessionRegistration] = [:]
     private var sessionProcessPIDs: [String: Set<Int>] = [:]
     private var sessionProcessAncestors: [String: [ProcessAncestor]] = [:]
@@ -128,6 +129,7 @@ actor SessionStore {
         switch event.kind {
         case .sessionStart:
             cancelTemporaryState(for: event.sessionKey)
+            activeToolStartCounts.removeValue(forKey: event.sessionKey)
             sessionProcessAncestors[event.sessionKey] = event.processInfo?.ancestors ?? []
             let project = resolver.resolve(cwd: event.cwd, agent: event.agent)
             let s = Session(agent: event.agent,
@@ -165,26 +167,40 @@ actor SessionStore {
             s.lastEventAt = event.at
             switch event.kind {
             case .toolStart(let n):
+                recordToolStart(name: n, sessionKey: event.sessionKey)
                 setState(.running, for: &s, sessionKey: event.sessionKey)
-                s.lastBalloon = BalloonText(text: ToolDisplayName.display(for: n, detail: event.detail), postedAt: event.at)
-            case .toolEnd(_, let success):
+                let presentation = ToolBalloonPresentation.presentation(for: n, detail: event.detail)
+                s.lastBalloon = BalloonText(text: presentation.text,
+                                            postedAt: event.at,
+                                            style: presentation.style)
+            case .toolEnd(let n, let success):
                 // On success, *stay* `.running`. The agent is typically still
                 // working between tool calls — flipping to `.idle` between
                 // every PostToolUse / PreToolUse pair makes the pet flicker
                 // idle when it should look busy. The eventual transition to
                 // `.idle` happens on `.turnEnd` (Claude Code's Stop hook).
+                let hadPreToolUse = consumeToolStart(name: n, sessionKey: event.sessionKey)
+                if !hadPreToolUse {
+                    let presentation = ToolBalloonPresentation.presentation(for: n, detail: event.detail)
+                    s.lastBalloon = BalloonText(text: presentation.text,
+                                                postedAt: event.at,
+                                                style: presentation.style)
+                    if success {
+                        setState(.running, for: &s, sessionKey: event.sessionKey)
+                    }
+                }
                 if !success { setState(.failed, for: &s, sessionKey: event.sessionKey) }
             case .turnEnd:
                 setTemporaryState(.jumping, fallback: .idle, for: &s, sessionKey: event.sessionKey)
             case .promptSubmit:
                 setState(.review, for: &s, sessionKey: event.sessionKey)
-                s.lastBalloon = BalloonText(text: "Thinking...", postedAt: event.at)
+                s.lastBalloon = BalloonText(text: "Thinking...", postedAt: event.at, style: .thought)
             case .waitingForInput(let m):
                 setState(.waiting, for: &s, sessionKey: event.sessionKey)
                 if let m { s.lastBalloon = BalloonText(text: m, postedAt: event.at) }
             case .compacting:
                 setState(.review, for: &s, sessionKey: event.sessionKey)
-                s.lastBalloon = BalloonText(text: "Compacting...", postedAt: event.at)
+                s.lastBalloon = BalloonText(text: "Compacting...", postedAt: event.at, style: .thought)
             case .subagentStart:            s.subagentDepth += 1
             case .subagentEnd:              s.subagentDepth = max(0, s.subagentDepth - 1)
             case .error(let m):
@@ -317,6 +333,7 @@ actor SessionStore {
 
         cancelIdleTimer(for: childKey)
         cancelTemporaryState(for: childKey)
+        activeToolStartCounts[parentKey, default: [:]].merge(activeToolStartCounts.removeValue(forKey: childKey) ?? [:]) { $0 + $1 }
 
         let childAncestors = sessionProcessAncestors[childKey] ?? []
         let childPIDs = registerProcessPIDs(from: AgentProcessInfo(hookPID: nil,
@@ -366,6 +383,7 @@ actor SessionStore {
     }
 
     private func cleanupSessionProcessMetadata(for sessionKey: String) {
+        activeToolStartCounts.removeValue(forKey: sessionKey)
         for pid in sessionProcessPIDs.removeValue(forKey: sessionKey) ?? [] {
             processSessionKeysByPID.removeValue(forKey: pid)
         }
@@ -386,6 +404,31 @@ actor SessionStore {
     private func isSessionEnd(_ kind: AgentEventKind) -> Bool {
         if case .sessionEnd = kind { return true }
         return false
+    }
+
+    private func recordToolStart(name: String, sessionKey: String) {
+        let key = Self.toolStartKey(name)
+        activeToolStartCounts[sessionKey, default: [:]][key, default: 0] += 1
+    }
+
+    private func consumeToolStart(name: String, sessionKey: String) -> Bool {
+        let key = Self.toolStartKey(name)
+        guard var counts = activeToolStartCounts[sessionKey],
+              let count = counts[key],
+              count > 0 else {
+            return false
+        }
+        if count == 1 {
+            counts.removeValue(forKey: key)
+        } else {
+            counts[key] = count - 1
+        }
+        activeToolStartCounts[sessionKey] = counts.isEmpty ? nil : counts
+        return true
+    }
+
+    private static func toolStartKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func claudeAncestors(in processInfo: AgentProcessInfo) -> [ProcessAncestor] {

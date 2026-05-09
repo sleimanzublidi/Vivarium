@@ -26,15 +26,18 @@ final class BalloonNode: SKNode {
     static let cloudOutlineColor = NSColor(white: 0.12, alpha: 1)
 
     /// Visual style for the balloon. `.speech` is a rounded rect with a
-    /// triangular tail; `.thought` is a cloud body with trailing dots, the
-    /// classic comic thought-bubble.
+    /// triangular tail; `.thought` is a cloud body; `.terminal` is a dark
+    /// speech bubble; `.duckThought` is a thought cloud with a duck badge.
     enum Style: Equatable {
         case speech
         case thought
+        case terminal
+        case duckThought
     }
 
-    private static let bodyFontSize: CGFloat = 11
+    private static let bodyFontSize: CGFloat = 10
     private static let headerFontSize: CGFloat = 9
+
     /// Fade in/out animations. Stack-layout adjustments reuse this key to
     /// supersede an in-flight fade with a fade to the new target alpha.
     private static let fadeActionKey = "balloonFade"
@@ -46,9 +49,11 @@ final class BalloonNode: SKNode {
     private let cloudOutline = SKShapeNode()
     private let background = SKShapeNode()
     private let tail = SKShapeNode()
+    private let duckBadge = SKNode()
     private let header: SKLabelNode
     private let body: SKLabelNode
-    private var style: Style = .speech
+    private(set) var style: Style = .speech
+    var showsDuckBadge: Bool { !duckBadge.isHidden }
 
     /// The bubble rect from the most recent `present(...)` call, in
     /// balloon-local coordinates. `nil` while hidden. SceneDirector reads
@@ -99,9 +104,13 @@ final class BalloonNode: SKNode {
         cloudOutline.lineWidth = 0
         cloudOutline.isHidden = true
 
+        buildDuckBadge()
+        duckBadge.isHidden = true
+
         addChild(cloudOutline)
         addChild(background)
         addChild(tail)
+        addChild(duckBadge)
         addChild(header)
         addChild(body)
 
@@ -143,13 +152,15 @@ final class BalloonNode: SKNode {
         self.body.preferredMaxLayoutWidth = textMaxWidth
         body.text = text
         self.style = style
+        applyTextStyle(style)
 
         let geom = BalloonGeometry.compute(
             headerSize: trimmedHeader.isEmpty ? .zero : self.header.calculateAccumulatedFrame().size,
             bodySize: body.calculateAccumulatedFrame().size,
             petXInScene: petXInScene,
             sceneWidth: sceneWidth,
-            anchorY: anchorY)
+            anchorY: anchorY,
+            style: style)
         apply(geom)
         lastBubbleRect = geom.bubbleRect
 
@@ -206,36 +217,93 @@ final class BalloonNode: SKNode {
     private func apply(_ g: BalloonGeometry) {
         header.position = g.headerPosition
         body.position = g.bodyPosition
+        duckBadge.isHidden = true
 
         switch style {
         case .speech:
-            cloudOutline.isHidden = true
-            background.strokeColor = NSColor(white: 0.6, alpha: 1)
-            background.lineWidth = 0.5
-            // Bubble + tail are a single continuous outline so the bubble's
-            // bottom-edge stroke doesn't draw through the join. Separate
-            // shapes for body and tail (the previous approach) left a
-            // visible horizontal seam where the tail met the bubble base.
-            background.path = Self.speechBubblePath(
-                bubbleRect: g.bubbleRect,
-                cornerRadius: Self.cornerRadius,
-                tailBaseLeftX: g.tailBaseLeft.x,
-                tailBaseRightX: g.tailBaseRight.x,
-                tailApex: g.tailApex)
-            tail.path = nil
-        case .thought:
-            // `cloudPath` returns a SINGLE closed bezier outline — overlapping
-            // bumps share their intersection cusps, so the path traces only
-            // the outer silhouette. Stroke + fill cleanly with no internal
-            // arcs and no scene-coloured gaps between bumps.
-            cloudOutline.isHidden = true
-            background.strokeColor = Self.cloudOutlineColor
-            background.lineWidth = Self.cloudOutlineWidth
-            background.path = Self.cloudPath(in: g.bubbleRect, bumpRadius: Self.cloudBumpRadius)
-            // No tail for thought-style — the cloud silhouette + balloon
-            // position above the pet already convey the relationship.
-            tail.path = nil
+            applySpeechPath(g)
+        case .terminal:
+            applySpeechPath(g)
+        case .thought, .duckThought:
+            applyThoughtPath(g)
+            if style == .duckThought {
+                duckBadge.isHidden = false
+                duckBadge.position = CGPoint(x: g.bubbleRect.maxX - 12, y: g.bubbleRect.maxY - 4)
+            }
         }
+    }
+
+    private func applySpeechPath(_ g: BalloonGeometry) {
+        cloudOutline.isHidden = true
+        background.path = Self.speechBubblePath(
+            bubbleRect: g.bubbleRect,
+            cornerRadius: Self.cornerRadius,
+            tailBaseLeftX: g.tailBaseLeft.x,
+            tailBaseRightX: g.tailBaseRight.x,
+            tailApex: g.tailApex)
+        tail.path = nil
+    }
+
+    private func applyThoughtPath(_ g: BalloonGeometry) {
+        cloudOutline.isHidden = true
+        background.path = Self.cloudPath(in: g.bubbleRect, bumpRadius: Self.cloudBumpRadius)
+        // No tail for thought-style — the cloud silhouette + balloon position
+        // above the pet already convey the relationship.
+        tail.path = nil
+    }
+
+    private func applyTextStyle(_ style: Style) {
+        switch style {
+        case .speech, .thought, .duckThought:
+            background.fillColor = NSColor(white: 1.0, alpha: 0.95)
+            background.strokeColor = style == .speech ? NSColor(white: 0.6, alpha: 1) : Self.cloudOutlineColor
+            background.lineWidth = style == .speech ? 0.5 : Self.cloudOutlineWidth
+            tail.fillColor = background.fillColor
+            tail.strokeColor = background.strokeColor
+            tail.lineWidth = background.lineWidth
+            header.fontName = Self.roundedFontName(size: Self.headerFontSize, weight: .bold)
+            header.fontColor = NSColor(white: 0.35, alpha: 1)
+            body.fontName = Self.roundedFontName(size: Self.bodyFontSize, weight: .regular)
+            body.fontColor = NSColor(white: 0.1, alpha: 1)
+        case .terminal:
+            background.fillColor = NSColor(white: 0.08, alpha: 0.96)
+            background.strokeColor = NSColor(calibratedRed: 0.18, green: 0.85, blue: 0.42, alpha: 1)
+            background.lineWidth = 1.0
+            tail.fillColor = background.fillColor
+            tail.strokeColor = background.strokeColor
+            tail.lineWidth = background.lineWidth
+            header.fontName = Self.monospacedFontName(size: Self.headerFontSize - 1, weight: .regular)
+            header.fontColor = NSColor(white: 0.72, alpha: 1)
+            body.fontName = Self.monospacedFontName(size: Self.bodyFontSize - 1, weight: .medium)
+            body.fontColor = NSColor(calibratedRed: 0.62, green: 1.0, blue: 0.67, alpha: 1)
+        }
+    }
+
+    private func buildDuckBadge() {
+        let body = SKShapeNode(ellipseIn: CGRect(x: -7, y: -5, width: 13, height: 9))
+        body.fillColor = NSColor(calibratedRed: 1.0, green: 0.86, blue: 0.22, alpha: 1)
+        body.strokeColor = NSColor(white: 0.18, alpha: 1)
+        body.lineWidth = 0.8
+
+        let head = SKShapeNode(ellipseIn: CGRect(x: 0, y: 0, width: 8, height: 8))
+        head.fillColor = body.fillColor
+        head.strokeColor = body.strokeColor
+        head.lineWidth = body.lineWidth
+
+        let beak = SKShapeNode()
+        let beakPath = CGMutablePath()
+        beakPath.move(to: CGPoint(x: 7, y: 4))
+        beakPath.addLine(to: CGPoint(x: 12, y: 2))
+        beakPath.addLine(to: CGPoint(x: 7, y: 0))
+        beakPath.closeSubpath()
+        beak.path = beakPath
+        beak.fillColor = NSColor(calibratedRed: 1.0, green: 0.52, blue: 0.12, alpha: 1)
+        beak.strokeColor = body.strokeColor
+        beak.lineWidth = 0.6
+
+        duckBadge.addChild(body)
+        duckBadge.addChild(head)
+        duckBadge.addChild(beak)
     }
 
     /// Build a single closed path tracing the rounded bubble rect plus a
@@ -424,6 +492,11 @@ final class BalloonNode: SKNode {
         return base.fontName.isEmpty ? "HelveticaNeue" : base.fontName
     }
 
+    static func monospacedFontName(size: CGFloat, weight: NSFont.Weight) -> String {
+        let font = NSFont.monospacedSystemFont(ofSize: size, weight: weight)
+        return font.fontName.isEmpty ? "Menlo" : font.fontName
+    }
+
 }
 
 /// Pure geometric layout for `BalloonNode`. Lives in balloon-local
@@ -443,7 +516,8 @@ struct BalloonGeometry: Equatable {
                         bodySize: CGSize,
                         petXInScene: CGFloat,
                         sceneWidth: CGFloat,
-                        anchorY: CGFloat) -> BalloonGeometry
+                        anchorY: CGFloat,
+                        style: BalloonNode.Style = .speech) -> BalloonGeometry
     {
         let pad = BalloonNode.padding
         let hasHeader = headerSize != .zero
@@ -453,7 +527,13 @@ struct BalloonGeometry: Equatable {
 
         let bubbleW = max(contentW + pad.width * 2, 28)
         let bubbleH = max(contentH + pad.height * 2, 18)
-        let bubbleY = anchorY + BalloonNode.tailHeight
+        // Thought clouds have bottom-edge bumps that puff `cloudBumpRadius`
+        // below `bubbleRect.minY`. Lift the rect by that bleed so the cloud's
+        // visible silhouette lands just above the pet instead of overlapping
+        // the pet's head.
+        let isThoughtCloud = style == .thought || style == .duckThought
+        let bottomBleed: CGFloat = isThoughtCloud ? BalloonNode.cloudBumpRadius : 0
+        let bubbleY = anchorY + BalloonNode.tailHeight + bottomBleed
 
         // Horizontal clamp — see comment in BalloonNode.
         let margin = BalloonNode.edgeMargin

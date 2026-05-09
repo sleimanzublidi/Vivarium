@@ -43,9 +43,16 @@ final class ClaudeCodeAdapterTests: XCTestCase {
         XCTAssertEqual(e.detail, "ls")
     }
 
+    func test_preToolUseRubberDuckTask_preservesStructuredMetadataInDetail() throws {
+        let e = try XCTUnwrap(try adapt("pre-tool-use-rubber-duck-task"))
+        XCTAssertEqual(e.kind, .toolStart(name: "Task"))
+        XCTAssertEqual(e.detail, "subagent_type=rubber-duck description=Critique the implementation plan")
+    }
+
     func test_postToolUseBash_isToolEndSuccess() throws {
         let e = try XCTUnwrap(try adapt("post-tool-use-bash"))
         XCTAssertEqual(e.kind, .toolEnd(name: "Bash", success: true))
+        XCTAssertEqual(e.detail, "ls")
     }
 
     func test_notification_isWaitingForInput() throws {

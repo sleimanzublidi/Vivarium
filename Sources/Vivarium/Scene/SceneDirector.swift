@@ -340,11 +340,12 @@ final class SceneDirector {
     /// We show a sticky balloon while a pet is in any "informative" state:
     ///   - `.waiting` / `.failed` — the user needs to act
     ///   - `.running` — show which tool is active
+    ///   - `.review` — show thought/progress text
     /// In every other state, any visible balloon is cleared so stale text
     /// doesn't linger after the user has acted or after a tool finished.
     private func updateBalloon(session: Session, on node: PetNode) {
         guard Self.showsStickyBalloon(for: session.state) else {
-            // Pet is idle / reviewing / etc. — drop any sticky balloon.
+            // Pet is idle / transient / etc. — drop any sticky balloon.
             // The dedupe entry is preserved so a future re-entry with the
             // same `postedAt` is still skipped.
             node.balloon.dismiss()
@@ -367,7 +368,7 @@ final class SceneDirector {
                              bubbleMaxWidth: bubbleMaxWidth(for: node),
                              ttl: balloonTTL,
                              sticky: true,
-                             style: session.state == .review ? .thought : .speech)
+                             style: BalloonNode.Style(visualStyle: balloon.style))
     }
 
     private func bubbleMaxWidth(for node: PetNode) -> CGFloat {
@@ -507,5 +508,16 @@ final class SceneDirector {
         }
         label.text = "+\(hiddenCount)"
         label.position = CGPoint(x: scene.size.width - 6, y: scene.size.height - 4)
+    }
+}
+
+private extension BalloonNode.Style {
+    init(visualStyle: BalloonVisualStyle) {
+        switch visualStyle {
+        case .speech: self = .speech
+        case .thought: self = .thought
+        case .terminal: self = .terminal
+        case .duckThought: self = .duckThought
+        }
     }
 }

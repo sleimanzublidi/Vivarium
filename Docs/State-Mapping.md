@@ -76,7 +76,7 @@ struct AgentEvent {
 | --------------------------------- | ------------------------------------------------------------------- |
 | `.sessionStart`                   | new `Session`, `state = .idle`                                      |
 | `.sessionEnd`                     | session removed entirely                                            |
-| `.toolStart(name)`                | `.running` (+ tool-name balloon, with command for Bash/Shell)       |
+| `.toolStart(name)`                | `.running` (+ styled tool balloon; terminal for Bash/Shell, duck-thought for rubber-duck delegation) |
 | `.toolEnd(success: true)`         | **stays `.running`** — agents typically chain tools within a turn   |
 | `.toolEnd(success: false)`        | `.failed`                                                           |
 | `.turnEnd`                        | temporary `.jumping` (~1.8 s celebration), then fallback to `.idle` |
@@ -85,6 +85,8 @@ struct AgentEvent {
 | `.compacting`                     | `.review` (+ "Compacting…" balloon)                                 |
 | `.subagentStart` / `.subagentEnd` | no state change; bumps `subagentDepth ±1`                           |
 | `.error(message)`                 | `.failed` (+ error message balloon)                                 |
+
+Tool balloons carry their visual style in `Session.lastBalloon`: shell tools show a compact terminal bubble using the executable summary (for example `$ git`), rubber-duck Task/agent delegation shows a thought cloud with a duck badge, prompt/compact messages stay thought clouds, and ordinary tool/waiting/error messages use the default speech bubble.
 
 The states `.runningRight`, `.runningLeft`, `.waving`, `.jumping` are not reached by any agent event directly; they're driven by the scene and store as transient animations:
 
@@ -158,6 +160,7 @@ Claude workers spawned by a parent session (for example via Orc in a separate wo
 | Unified event model                 | `Models/AgentEvent.swift`                       |
 | Pet state enum + Codex rows        | `Models/PetState.swift`                         |
 | Codex layout / row specs           | `Models/PetPack.swift`                          |
+| Tool balloon text/style            | `Models/ToolDisplayName.swift`                  |
 | Session state machine              | `Sessions/SessionStore.swift`                   |
 | Pet animation playback             | `Scene/PetNode.swift`                           |
 | Visibility / balloon orchestration | `Scene/SceneDirector.swift`                     |

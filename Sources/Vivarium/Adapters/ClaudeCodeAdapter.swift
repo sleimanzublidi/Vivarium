@@ -29,6 +29,25 @@ struct ClaudeCodeAdapter: EventAdapter {
 
     private struct ToolInput: Decodable {
         let command: String?
+        let subagent_type: String?
+        let subagentType: String?
+        let agent_type: String?
+        let agentType: String?
+        let name: String?
+        let description: String?
+
+        var detail: String? {
+            if let command { return command }
+            let metadata = [
+                subagent_type.map { "subagent_type=\($0)" },
+                subagentType.map { "subagentType=\($0)" },
+                agent_type.map { "agent_type=\($0)" },
+                agentType.map { "agentType=\($0)" },
+                name.map { "name=\($0)" },
+                description.map { "description=\($0)" },
+            ].compactMap { $0 }
+            return metadata.isEmpty ? nil : metadata.joined(separator: " ")
+        }
     }
 
     private struct ToolResponse: Decodable {
@@ -73,12 +92,12 @@ struct ClaudeCodeAdapter: EventAdapter {
         case "PreToolUse":
             guard let n = env.payload.tool_name else { return nil }
             kind = .toolStart(name: n)
-            detail = env.payload.tool_input?.command
+            detail = env.payload.tool_input?.detail
         case "PostToolUse":
             guard let n = env.payload.tool_name else { return nil }
             let ok = !(env.payload.tool_response?.is_error ?? false)
             kind = .toolEnd(name: n, success: ok)
-            detail = nil
+            detail = env.payload.tool_input?.detail
         case "Notification":
             kind = .waitingForInput(message: env.payload.message)
             detail = env.payload.message

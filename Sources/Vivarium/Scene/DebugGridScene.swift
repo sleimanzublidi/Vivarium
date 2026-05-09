@@ -115,19 +115,27 @@ final class DebugGridScene: SKScene {
             sceneWidth: size.width,
             anchorY: node.size.height / 2 + 2,
             sticky: true,
-            style: state == .review ? .thought : .speech)
+            style: Self.sampleBalloonStyle(for: state))
     }
 
-    /// Representative balloon content per state — enough to exercise both
-    /// the speech bubble (`.running` / `.waiting` / `.failed`) and the
-    /// thought bubble (`.review`) rendering paths.
+    /// Representative balloon content per state — enough to exercise the
+    /// terminal bubble (`.running`), speech bubble (`.waiting` / `.failed`),
+    /// and thought bubble (`.review`) rendering paths.
     static func sampleBalloonText(for state: PetState) -> String? {
         switch state {
-        case .running: return "Bashing"
+        case .running: return "$ swift"
         case .waiting: return "Continue?"
         case .failed:  return "Permission denied"
         case .review:  return "Thinking..."
         default:       return nil
+        }
+    }
+
+    static func sampleBalloonStyle(for state: PetState) -> BalloonNode.Style {
+        switch state {
+        case .running: return .terminal
+        case .review: return .thought
+        default: return .speech
         }
     }
 }

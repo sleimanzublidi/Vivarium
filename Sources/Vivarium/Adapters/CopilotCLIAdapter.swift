@@ -26,11 +26,10 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         let cwd: String?
         let prompt: String?
         let toolName: String?
-        let toolArgsCommand: String?
-        // Note: Copilot CLI emits `toolArgs` as a JSON object whose shape is
-        // tool-specific. We don't currently use it — listing it here as a
-        // String would make `init(from:)` throw a typeMismatch and kill
-        // the whole envelope decode on every preToolUse / postToolUse.
+        let toolArgsDetail: String?
+        // Copilot CLI emits `toolArgs` as a JSON object whose shape is
+        // tool-specific. Decode only the fields we use for balloon summaries
+        // and leave unrelated tool-specific payloads alone.
         let toolResult: ToolResult?
         let error: CopilotError?
         let reason: String?
@@ -52,7 +51,7 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
             prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
             toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
-            toolArgsCommand = Self.decodeToolArgsCommand(c, forKey: .toolArgs)
+            toolArgsDetail = Self.decodeToolArgsDetail(c, forKey: .toolArgs)
             toolResult = try c.decodeIfPresent(ToolResult.self, forKey: .toolResult)
             error = try c.decodeIfPresent(CopilotError.self, forKey: .error)
             reason = try c.decodeIfPresent(String.self, forKey: .reason)
@@ -70,16 +69,16 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
             return nil
         }
 
-        private static func decodeToolArgsCommand(_ c: KeyedDecodingContainer<CodingKeys>,
-                                                  forKey key: CodingKeys) -> String?
+        private static func decodeToolArgsDetail(_ c: KeyedDecodingContainer<CodingKeys>,
+                                                 forKey key: CodingKeys) -> String?
         {
             if let args = try? c.decode(ToolArgs.self, forKey: key) {
-                return args.command
+                return args.detail
             }
             if let raw = try? c.decode(String.self, forKey: key),
                let data = raw.data(using: .utf8),
                let args = try? JSONDecoder().decode(ToolArgs.self, from: data) {
-                return args.command
+                return args.detail
             }
             return nil
         }
@@ -87,6 +86,25 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
 
     private struct ToolArgs: Decodable {
         let command: String?
+        let subagent_type: String?
+        let subagentType: String?
+        let agent_type: String?
+        let agentType: String?
+        let name: String?
+        let description: String?
+
+        var detail: String? {
+            if let command { return command }
+            let metadata = [
+                subagent_type.map { "subagent_type=\($0)" },
+                subagentType.map { "subagentType=\($0)" },
+                agent_type.map { "agent_type=\($0)" },
+                agentType.map { "agentType=\($0)" },
+                name.map { "name=\($0)" },
+                description.map { "description=\($0)" },
+            ].compactMap { $0 }
+            return metadata.isEmpty ? nil : metadata.joined(separator: " ")
+        }
     }
 
     private struct ToolResult: Decodable {
@@ -169,12 +187,12 @@ final class CopilotCLIAdapter: EventAdapter, @unchecked Sendable {
         case "preToolUse":
             guard let n = env.payload.toolName else { return nil }
             kind = .toolStart(name: n)
-            detail = env.payload.toolArgsCommand
+            detail = env.payload.toolArgsDetail
         case "postToolUse":
             guard let n = env.payload.toolName else { return nil }
             let ok = (env.payload.toolResult?.resultType ?? "success") == "success"
             kind = .toolEnd(name: n, success: ok)
-            detail = nil
+            detail = env.payload.toolArgsDetail
         case "errorOccurred":
             guard let m = env.payload.error?.message else { return nil }
             kind = .error(message: m)

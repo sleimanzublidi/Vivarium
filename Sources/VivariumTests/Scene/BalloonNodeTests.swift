@@ -22,6 +22,33 @@ final class BalloonNodeTests: XCTestCase {
         XCTAssertTrue(balloon.isHidden)
     }
 
+    func test_present_terminalStyleRecordsStyleAndDoesNotShowDuckBadge() {
+        let balloon = BalloonNode()
+        balloon.present(header: "Project", text: "$ git",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 0, ttl: 5,
+                        style: .terminal)
+        XCTAssertEqual(balloon.style, .terminal)
+        XCTAssertFalse(balloon.showsDuckBadge)
+    }
+
+    func test_present_duckThoughtStyleShowsDuckBadge_andSpeechResetsIt() {
+        let balloon = BalloonNode()
+        balloon.present(header: "Project", text: "Rubber ducking...",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 0, ttl: 5,
+                        style: .duckThought)
+        XCTAssertEqual(balloon.style, .duckThought)
+        XCTAssertTrue(balloon.showsDuckBadge)
+
+        balloon.present(header: "Project", text: "Done",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 0, ttl: 5,
+                        style: .speech)
+        XCTAssertEqual(balloon.style, .speech)
+        XCTAssertFalse(balloon.showsDuckBadge)
+    }
+
     /// `lastBubbleRect` is the contract SceneDirector reads to compute
     /// scene-space overlap between balloons on different pets. It must be
     /// populated after `present` and cleared by `dismiss` so a hidden
@@ -206,6 +233,31 @@ final class BalloonGeometryTests: XCTestCase {
                              "header should make the bubble taller")
     }
 
+    /// Thought clouds have bottom bumps that puff `cloudBumpRadius` below
+    /// `bubbleRect.minY`. Geometry must lift the rect by that bleed for
+    /// `.thought` so the visible silhouette doesn't overlap the pet.
+    func test_compute_thoughtStyle_liftsBubbleByCloudBumpRadius() {
+        let speech = BalloonGeometry.compute(
+            headerSize: .zero, bodySize: body(80, 20),
+            petXInScene: 160,
+            sceneWidth: 320,
+            anchorY: 50,
+            style: .speech)
+        let thought = BalloonGeometry.compute(
+            headerSize: .zero, bodySize: body(80, 20),
+            petXInScene: 160,
+            sceneWidth: 320,
+            anchorY: 50,
+            style: .thought)
+        XCTAssertEqual(thought.bubbleRect.minY - speech.bubbleRect.minY,
+                       BalloonNode.cloudBumpRadius,
+                       accuracy: 0.01)
+        // Visible cloud bottom = rect.minY − cloudBumpRadius — must clear
+        // the speech tail apex (anchorY) so it doesn't sit on the pet.
+        let visibleCloudBottom = thought.bubbleRect.minY - BalloonNode.cloudBumpRadius
+        XCTAssertGreaterThanOrEqual(visibleCloudBottom, 50)
+    }
+
     /// The bubble width grows to fit whichever of header/body is wider.
     func test_compute_widthMatchesWidestLine() {
         let headerWide = BalloonGeometry.compute(
@@ -373,6 +425,17 @@ final class SceneDirectorBalloonTests: XCTestCase {
         director.addOrUpdate(session: s)
         let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
         XCTAssertFalse(pet.balloon.isHidden)
+    }
+
+    func test_addOrUpdate_usesStoredBalloonStyleInsteadOfInferringFromState() {
+        let director = makeDirector()
+        let s = makeSession(state: .running,
+                            balloon: BalloonText(text: "$ git",
+                                                 postedAt: Date(),
+                                                 style: .terminal))
+        director.addOrUpdate(session: s)
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        XCTAssertEqual(pet.balloon.style, .terminal)
     }
 
     /// When a tool finishes and the pet returns to `.idle`, the running

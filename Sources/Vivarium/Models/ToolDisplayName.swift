@@ -56,7 +56,7 @@ enum ToolDisplayName {
         return nil
     }
 
-    private static func isShellTool(_ toolName: String) -> Bool {
+    static func isShellTool(_ toolName: String) -> Bool {
         ["bash", "shell"].contains(toolName.lowercased())
     }
 
@@ -123,7 +123,8 @@ enum ToolDisplayName {
         "read":            "Reading",
         "grep":            "Searching",
         "glob":            "Searching",
-        "webfetch":        "Fetching",
+        "webfetch":        "Fetching from web",
+        "web_fetch":       "Fetching from web",
         "websearch":       "Searching the web",
         "task":            "Delegating",
         "agent":           "Delegating",
@@ -149,4 +150,46 @@ enum ToolDisplayName {
         "rg":              "Searching",
         "report_intent":   "Understanding",
     ]
+}
+
+struct ToolBalloonPresentation: Equatable {
+    let text: String
+    let style: BalloonVisualStyle
+
+    static func presentation(for toolName: String, detail: String? = nil) -> ToolBalloonPresentation {
+        if ToolDisplayName.isShellTool(toolName) {
+            let commandName = detail.flatMap(ToolDisplayName.shellCommandSummary(from:))
+                ?? toolName.lowercased()
+            return ToolBalloonPresentation(text: "$ \(commandName)", style: .terminal)
+        }
+
+        if isRubberDuckTool(toolName: toolName, detail: detail) {
+            return ToolBalloonPresentation(text: "Rubber ducking...", style: .duckThought)
+        }
+
+        return ToolBalloonPresentation(text: ToolDisplayName.display(for: toolName, detail: detail),
+                                       style: .speech)
+    }
+
+    private static func isRubberDuckTool(toolName: String, detail: String?) -> Bool {
+        if containsRubberDuckMarker(toolName) { return true }
+        guard isDelegationTool(toolName), let detail else { return false }
+        return containsRubberDuckMarker(detail)
+    }
+
+    private static func isDelegationTool(_ toolName: String) -> Bool {
+        let lower = toolName.lowercased()
+        return ["task", "agent", "taskcreate"].contains(lower)
+    }
+
+    private static func containsRubberDuckMarker(_ value: String) -> Bool {
+        let lower = value.lowercased()
+        if lower.contains("rubber-duck") || lower.contains("rubber_duck") || lower.contains("rubberduck") {
+            return true
+        }
+        let tokens = lower
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+        return tokens.contains("rubber") && tokens.contains("duck")
+    }
 }

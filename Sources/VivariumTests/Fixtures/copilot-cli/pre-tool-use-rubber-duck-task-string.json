@@ -1,0 +1,12 @@
+{
+  "agent": "copilot-cli",
+  "event": "preToolUse",
+  "pid": 22000,
+  "ppid": 21000,
+  "payload": {
+    "timestamp": "2026-05-06T10:00:02Z",
+    "cwd": "/Users/me/Source/bar",
+    "toolName": "task",
+    "toolArgs": "{\"agent_type\":\"rubber-duck\",\"description\":\"Critique the current plan\"}"
+  }
+}

@@ -104,6 +104,87 @@ final class SessionStoreTests: XCTestCase {
                        "successful toolEnd should keep state at .running so the pet looks busy between tools")
     }
 
+    func test_shellToolStart_setsTerminalBalloonStyle() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: "git status --short",
+                                 at: clock.now))
+        let balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.text, "$ git")
+        XCTAssertEqual(balloon?.style, .terminal)
+    }
+
+    func test_toolEndWithoutMatchingPreToolUse_synthesizesToolBalloon() async {
+        await store.apply(.init(agent: .copilotCli, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .promptSubmit(text: "run tests"),
+                                 detail: "run tests",
+                                 at: clock.now))
+        clock.now = clock.now.addingTimeInterval(1)
+
+        await store.apply(.init(agent: .copilotCli, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolEnd(name: "bash", success: true),
+                                 detail: "go test ./...",
+                                 at: clock.now))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.first?.state, .running)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "$ go")
+        XCTAssertEqual(snap.first?.lastBalloon?.style, .terminal)
+    }
+
+    func test_toolEndWithMatchingPreToolUse_doesNotReplacePreToolBalloon() async {
+        await store.apply(.init(agent: .copilotCli, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "bash"),
+                                 detail: "git status --short",
+                                 at: clock.now))
+        clock.now = clock.now.addingTimeInterval(1)
+
+        await store.apply(.init(agent: .copilotCli, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolEnd(name: "bash", success: true),
+                                 detail: "go test ./...",
+                                 at: clock.now))
+
+        let balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.text, "$ git")
+        XCTAssertEqual(balloon?.style, .terminal)
+    }
+
+    func test_rubberDuckToolStart_setsDuckThoughtBalloonStyle() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Task"),
+                                 detail: "subagent_type=rubber-duck description=Critique the plan",
+                                 at: clock.now))
+        let balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.text, "Rubber ducking...")
+        XCTAssertEqual(balloon?.style, .duckThought)
+    }
+
+    func test_promptAndCompactingUseThoughtBalloonStyle() async {
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .promptSubmit(text: "think"),
+                                 detail: "think",
+                                 at: clock.now))
+        var balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.text, "Thinking...")
+        XCTAssertEqual(balloon?.style, .thought)
+
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .compacting,
+                                 detail: nil,
+                                 at: clock.now))
+        balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.text, "Compacting...")
+        XCTAssertEqual(balloon?.style, .thought)
+    }
+
     func test_toolEndFailure_setsFailed() async {
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
@@ -283,7 +364,7 @@ final class SessionStoreTests: XCTestCase {
                                  kind: .toolStart(name: "WebFetch"),
                                  detail: nil, at: clock.now))
         let snap = await store.snapshot()
-        XCTAssertEqual(snap.first?.lastBalloon?.text, "Fetching")
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Fetching from web")
         XCTAssertEqual(snap.first?.lastBalloon?.postedAt, clock.now)
     }
 
@@ -295,7 +376,7 @@ final class SessionStoreTests: XCTestCase {
 
         let snap = await store.snapshot()
         XCTAssertEqual(snap.first?.state, .running)
-        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "$ git")
     }
 
     func test_promptSubmit_setsReviewAndThinkingBalloon() async {
@@ -488,7 +569,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.first, addedSession)
         XCTAssertEqual(snapshot.first?.sessionKey, "k1")
         XCTAssertEqual(snapshot.first?.state, .running)
-        XCTAssertEqual(snapshot.first?.lastBalloon?.text, "Bash(git)")
+        XCTAssertEqual(snapshot.first?.lastBalloon?.text, "$ git")
     }
 
     func test_restoreDropsStaleSessionsAndRewritesSnapshot() async throws {
@@ -692,7 +773,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snap.count, 1)
         XCTAssertEqual(snap.first?.sessionKey, "parent")
         XCTAssertEqual(snap.first?.state, .running)
-        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "$ git")
     }
 
     func test_childClaudeSessionEnd_doesNotRemoveParentPet() async {
@@ -760,7 +841,7 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(snap.map(\.sessionKey), ["parent"])
         XCTAssertEqual(snap.first?.headlessChildCount, 1)
         XCTAssertEqual(snap.first?.state, .running)
-        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "$ git")
     }
 
     // MARK: - Lenient session creation (sessions that started before the app launched)

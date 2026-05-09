@@ -57,10 +57,25 @@ final class CopilotCLIAdapterTests: XCTestCase {
         XCTAssertEqual(e.detail, "go test ./...")
     }
 
+    func test_preToolUse_rubberDuckObjectToolArgsPreservesStructuredMetadataInDetail() throws {
+        _ = try adapt("session-start")
+        let e = try XCTUnwrap(try adapt("pre-tool-use-rubber-duck-task-object"))
+        XCTAssertEqual(e.kind, .toolStart(name: "task"))
+        XCTAssertEqual(e.detail, "agent_type=rubber-duck description=Critique the current plan")
+    }
+
+    func test_preToolUse_rubberDuckStringToolArgsPreservesStructuredMetadataInDetail() throws {
+        _ = try adapt("session-start")
+        let e = try XCTUnwrap(try adapt("pre-tool-use-rubber-duck-task-string"))
+        XCTAssertEqual(e.kind, .toolStart(name: "task"))
+        XCTAssertEqual(e.detail, "agent_type=rubber-duck description=Critique the current plan")
+    }
+
     func test_postToolUseSuccess() throws {
         _ = try adapt("session-start")
         let e = try XCTUnwrap(try adapt("post-tool-use"))
         XCTAssertEqual(e.kind, .toolEnd(name: "bash", success: true))
+        XCTAssertEqual(e.detail, "go test ./...")
     }
 
     func test_errorOccurred_isError() throws {
@@ -121,5 +136,6 @@ final class CopilotCLIAdapterTests: XCTestCase {
     func test_realCopilot_postToolUse_acceptsObjectToolArgs() throws {
         let e = try XCTUnwrap(try adapt("post-tool-use-real"))
         XCTAssertEqual(e.kind, .toolEnd(name: "view", success: true))
+        XCTAssertNil(e.detail)
     }
 }

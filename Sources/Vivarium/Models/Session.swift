@@ -7,9 +7,36 @@ struct ProjectIdentity: Hashable, Codable, Sendable {
     let petId: String
 }
 
+enum BalloonVisualStyle: String, Codable, Equatable, Sendable {
+    case speech
+    case thought
+    case terminal
+    case duckThought
+}
+
 struct BalloonText: Equatable, Codable, Sendable {
     let text: String
     let postedAt: Date
+    let style: BalloonVisualStyle
+
+    init(text: String, postedAt: Date, style: BalloonVisualStyle = .speech) {
+        self.text = text
+        self.postedAt = postedAt
+        self.style = style
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case postedAt
+        case style
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        postedAt = try c.decode(Date.self, forKey: .postedAt)
+        style = try c.decodeIfPresent(BalloonVisualStyle.self, forKey: .style) ?? .speech
+    }
 }
 
 struct Session: Equatable, Codable, Sendable {
