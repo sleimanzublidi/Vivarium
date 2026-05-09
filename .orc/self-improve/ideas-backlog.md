@@ -19,24 +19,11 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 
 | Composite | ID | Title |
 |---:|---|---|
-| 16 | IDEA-001 | Surface pack validation issues in the menu bar |
 | 16 | IDEA-002 | Post-install bridge selftest in setup.sh and notify helper |
 | 16 | IDEA-006 | Load `~/.vivarium/projects.json` overrides at launch |
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
 | 13 | IDEA-007 | `Scripts/setup.sh --uninstall` to cleanly remove Vivarium hooks |
-
-## IDEA-001
-**Title:** Surface pack validation issues in the menu bar
-**Source:** engineering
-**Value:** 3
-**Feasibility:** 5
-**Safety:** 5
-**Composite:** 16
-**Status:** candidate
-**Description:** Capture the `outcome.issues: [DiscoveryIssue]` already returned by `PetLibrary.discoverAll` (currently dropped at `Sources/Vivarium/AppDelegate.swift:46`) and surface it. Add a "Pets" submenu to the existing `NSStatusItem` with two items: `Issues (N)…` (visible only when N > 0) and `Open ~/.vivarium/pets`. Clicking `Issues (N)…` opens an `NSAlert` listing each problematic directory with a humanized `PetIssue` description (`missingManifest`, `invalidManifest`, `missingSpritesheet`, `invalidDimensions(w, h)`, `duplicateID(id)`). Reuse the existing `PetLibrary.PetIssue` enum — add a `var humanized: String` extension covered by tests. Update issues live whenever a drag-and-drop install runs (`installPack(fromZip:into:)` already throws a typed error) by appending to a small in-memory array on `AppDelegate`. No persistence required.
-**Rationale:** Pack failures are silent: rejected packs are logged to the console (which a typical user never opens) and the tank silently continues with the bundled fallback. A user who drops a `.zip` and sees nothing has no way to tell whether the file was malformed, dimensions were wrong, the id collided, or the drop wasn't seen at all. The data is already collected — only the surface is missing. Explicit roadmap item ("Pets → Issues (N)").
-**Notes:** Engineering framing supersedes the product framing of the same idea: it identifies the exact line where the data is dropped and names the enum to extend. Lower frequency than hook detection but cheap and unambiguous.
 
 ## IDEA-002
 **Title:** Post-install bridge selftest in setup.sh and notify helper
