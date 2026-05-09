@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-105617
+Last updated: 20260509-191023
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
@@ -11,7 +11,7 @@ Each idea is scored from 1 to 5 on:
 - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
 - **Safety:** likelihood the change can be made without regressions.
 
-Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the primary driver; feasibility and safety act as gates.
+Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the rubric's primary driver — feasibility and safety are gates rather than goals.
 
 Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes.
 
@@ -21,8 +21,13 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 |---:|---|---|
 | 16 | IDEA-002 | Post-install bridge selftest in setup.sh and notify helper |
 | 16 | IDEA-006 | Load `~/.vivarium/projects.json` overrides at launch |
+| 16 | IDEA-008 | Surface pet pack import issues |
+| 16 | IDEA-012 | Reject pet packs whose extracted contents resolve outside the pack root |
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
+| 15 | IDEA-011 | Use Copilot hook PID when synthesizing fallback session keys |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
+| 14 | IDEA-009 | Opt-in attention alerts for waiting or failed sessions |
+| 14 | IDEA-010 | Manual refresh for externally added pet packs |
 | 13 | IDEA-007 | `Scripts/setup.sh --uninstall` to cleanly remove Vivarium hooks |
 
 ## IDEA-002
@@ -84,3 +89,63 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 **Description:** Add a `--uninstall` flag to `Scripts/setup.sh` that strips Vivarium hook entries from `~/.claude/settings.json` and `~/.copilot/settings.json` (and per-repo `<repo>/.github/hooks/vivarium.json`) without re-adding them. Reuse the existing per-event jq filter that today's install runs as step (1) before re-adding entries. Take the same `*.vivarium.bak` backup the install path takes. Optional sub-flag `--purge` additionally removes `~/.vivarium/notify` and `~/.vivarium/sock`. Pets at `~/.vivarium/pets/` and project assignments at `~/.vivarium/settings.json` are intentionally left in place (user data). Print a per-file verdict (`Removed Vivarium entries from <path>` or `<path>: no Vivarium entries found`).
 **Rationale:** Today the project has a careful, idempotent installer but no documented uninstaller. A user who tries Vivarium and decides not to keep it has to either edit JSON by hand or restore the `*.vivarium.bak` backup — both fragile, and the latter only works once. The same gap also bites users hitting a setup bug who want a clean reinstall. Mostly compositional: strip jq filter exists, backup path exists, events array exists.
 **Notes:** Adversarial review trimmed Feasibility from the upstream 4 to 3 — no Bats infrastructure exists in `Scripts/test/`, so adding a `Scripts/test/uninstall.bats` is net-new test scaffolding (the proposal already concedes "or a one-off shell test if no Bats infra exists yet"). Risk lives entirely in `Scripts/setup.sh`; the `*.vivarium.bak` safety net plus the narrow `--uninstall` scope keep the blast radius bounded. Below the C=14 retention bar in pure composite terms but kept on backlog since it meets the V≥3 / F≥3 / S≥3 floor and closes a real lifecycle gap.
+
+## IDEA-008
+**Title:** Surface pet pack import issues
+**Source:** product
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 16
+**Status:** candidate
+**Description:** When a pet pack cannot be installed or loaded, show a clear user-facing issue list from the menu or tank UI. Each issue should name the pack, explain what went wrong in plain language, and suggest likely fixes such as checking the manifest, image format, dimensions, spritesheet path, or duplicate pet identifier.
+**Rationale:** Pet packs are a core customization promise, and `PetLibrary.DiscoveryOutcome` already collects load issues that are currently logged or discarded from the user's perspective. Clear import feedback helps users recover without console logs, makes third-party pack authoring less trial-and-error, and directly matches the spec's future-work item for surfacing pack validation issues.
+**Notes:** Kept because this is not the same as rotating logs: logs help debugging after the fact, while this is in-product recovery UX. Implementation should reuse existing `PetIssue` and `InstallError` descriptions rather than inventing a second validation vocabulary.
+
+## IDEA-009
+**Title:** Opt-in attention alerts for waiting or failed sessions
+**Source:** product
+**Value:** 4
+**Feasibility:** 3
+**Safety:** 3
+**Composite:** 14
+**Status:** candidate
+**Description:** Add an explicit menu preference for desktop alerts when an agent is waiting for user input or has failed. Alerts should be off by default, easy to enable, and limited to actionable states so users are not spammed during normal tool activity.
+**Rationale:** The tank can be hidden, covered, or on another display, making the most important states easy to miss. Opt-in alerts turn Vivarium from a passive visual companion into a practical attention aid while preserving a quiet default.
+**Notes:** AppDelegate already has commented attention-alert wiring, which makes this plausible, but the safety score stays at 3 because notification permissions, persistence of the preference, and spam suppression all need careful validation. Do not ship alerts without an off-by-default preference and de-duplication for repeated waiting/failed events.
+
+## IDEA-010
+**Title:** Manual refresh for externally added pet packs
+**Source:** product
+**Value:** 3
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 14
+**Status:** candidate
+**Description:** Add a visible "Refresh Pets" action that reloads pet packs copied or edited outside the app and reports how many packs were added, updated, rejected, or left unchanged. Drag-and-drop installation remains the fastest path, but manual refresh should cover Finder, script, or sync-tool workflows.
+**Rationale:** Restarting the app to discover externally managed packs is easy to miss and makes customization feel unreliable. A manual refresh is smaller and safer than full filesystem watching while still giving users an obvious recovery path when a copied pack does not appear.
+**Notes:** Kept as the safer slice of the roadmap's filesystem-watching goal. Scope should be constrained to explicit user action, reuse `PetLibrary.discoverAll`, invalidate texture caches for changed IDs, and surface refresh issues through the same UX as IDEA-008 if that exists first.
+
+## IDEA-011
+**Title:** Use Copilot hook PID when synthesizing fallback session keys
+**Source:** engineering
+**Value:** 3
+**Feasibility:** 5
+**Safety:** 4
+**Composite:** 15
+**Status:** candidate
+**Description:** Include `Envelope.pid` in Copilot fallback session identity, not just `(cwd, ppid, timestamp)`. `CopilotCLIAdapter.Envelope` already decodes both `pid` and `ppid`, but `originKey(cwd:ppid:)` and `synthesizeKey(cwd:ppid:timestamp:)` ignore `pid`. Add adapter tests showing two payloads with the same `cwd` and `ppid` but different `pid` produce distinct fallback session keys while repeated events from the same pid remain stable.
+**Rationale:** Session-key collisions merge distinct active agents into one pet, causing lost state transitions and misleading balloons. The fix uses data already present in the hook envelope and is limited to Copilot's legacy fallback path; modern `sessionId` handling remains authoritative.
+**Notes:** Adversarial review lowered Value from the new idea's 4 to 3 because the affected path is legacy/fallback and modern Copilot provides `sessionId`. It remains worth considering because the implementation is narrow and directly prevents a visible correctness failure when fallback synthesis is used.
+
+## IDEA-012
+**Title:** Reject pet packs whose extracted contents resolve outside the pack root
+**Source:** engineering
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 16
+**Status:** candidate
+**Description:** Harden pet ZIP validation against symlink and alias escapes. `loadPack(at:)` checks that the manifest-selected spritesheet path is syntactically under the pack directory, and `extractZip(_:to:)` checks extracted paths after `ditto`, but both checks compare standardized path strings rather than resolving symlink destinations or rejecting symlink entries. Add validation that rejects symlinks/aliases or resolves resource values before accepting/copying, plus install tests using a zip with a symlinked spritesheet or nested directory escape.
+**Rationale:** Drag-and-drop pet installation is a user-facing file ingestion path. A malicious or malformed pack should not make Vivarium read or persist references to files outside `~/.vivarium/pets/<id>`, and this hardening reduces both security risk and debugging ambiguity around broken packs.
+**Notes:** Kept as a high-value safety candidate that is adjacent to, but not duplicative of, IDEA-008. IDEA-008 tells users what went wrong; this one prevents accepting unsafe filesystem shapes in the first place.
