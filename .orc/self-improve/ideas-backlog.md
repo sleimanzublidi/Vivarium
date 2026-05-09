@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-105617
+Last updated: 20260509-192729
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
@@ -21,8 +21,12 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 |---:|---|---|
 | 16 | IDEA-002 | Post-install bridge selftest in setup.sh and notify helper |
 | 16 | IDEA-006 | Load `~/.vivarium/projects.json` overrides at launch |
+| 16 | IDEA-008 | Detect pet packs added outside the app |
+| 16 | IDEA-009 | Explain agent capability differences in product |
+| 16 | IDEA-010 | Quarantine corrupt global settings before writing defaults |
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
+| 14 | IDEA-011 | Move dropped pet-pack installation off the main UI path |
 | 13 | IDEA-007 | `Scripts/setup.sh --uninstall` to cleanly remove Vivarium hooks |
 
 ## IDEA-002
@@ -84,3 +88,51 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 **Description:** Add a `--uninstall` flag to `Scripts/setup.sh` that strips Vivarium hook entries from `~/.claude/settings.json` and `~/.copilot/settings.json` (and per-repo `<repo>/.github/hooks/vivarium.json`) without re-adding them. Reuse the existing per-event jq filter that today's install runs as step (1) before re-adding entries. Take the same `*.vivarium.bak` backup the install path takes. Optional sub-flag `--purge` additionally removes `~/.vivarium/notify` and `~/.vivarium/sock`. Pets at `~/.vivarium/pets/` and project assignments at `~/.vivarium/settings.json` are intentionally left in place (user data). Print a per-file verdict (`Removed Vivarium entries from <path>` or `<path>: no Vivarium entries found`).
 **Rationale:** Today the project has a careful, idempotent installer but no documented uninstaller. A user who tries Vivarium and decides not to keep it has to either edit JSON by hand or restore the `*.vivarium.bak` backup — both fragile, and the latter only works once. The same gap also bites users hitting a setup bug who want a clean reinstall. Mostly compositional: strip jq filter exists, backup path exists, events array exists.
 **Notes:** Adversarial review trimmed Feasibility from the upstream 4 to 3 — no Bats infrastructure exists in `Scripts/test/`, so adding a `Scripts/test/uninstall.bats` is net-new test scaffolding (the proposal already concedes "or a one-off shell test if no Bats infra exists yet"). Risk lives entirely in `Scripts/setup.sh`; the `*.vivarium.bak` safety net plus the narrow `--uninstall` scope keep the blast radius bounded. Below the C=14 retention bar in pure composite terms but kept on backlog since it meets the V≥3 / F≥3 / S≥3 floor and closes a real lifecycle gap.
+
+## IDEA-008
+**Title:** Detect pet packs added outside the app
+**Source:** product
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 16
+**Status:** candidate
+**Description:** Refresh the pet library when users add, remove, or update OpenPets packs directly under `~/.vivarium/pets/`, without requiring a full app relaunch. A manual "Rescan Pets" menu item is an acceptable first slice if automatic filesystem watching proves noisy; it should reuse `PetLibrary.discoverAll`, update the installed-pet registry, refresh the scene's available packs, and surface discovery issues without changing the drag-and-drop install contract.
+**Rationale:** Pet packs are a core extension point, and the README/spec explicitly note that drag-and-drop installs are live while packs copied through Finder or build scripts are not picked up until launch. Users comparing several downloaded or locally built packs can interpret a valid copied pack as broken when it does not appear immediately.
+**Notes:** No overlap with existing backlog entries. This is the highest-value retained product idea, but it lost this run to the restored-session idle-timer bug because automatic watching has more UI/state edge cases; keep the first implementation conservative and prefer a deterministic rescan action before broad FSEvents behavior.
+
+## IDEA-009
+**Title:** Explain agent capability differences in product
+**Source:** product
+**Value:** 3
+**Feasibility:** 5
+**Safety:** 5
+**Composite:** 16
+**Status:** candidate
+**Description:** Add a concise user-facing compatibility note explaining that Claude Code and GitHub Copilot CLI expose different hook event types, so some pet states are expected only for Claude Code. Candidate surfaces include setup output, the menu hook-status area, or an in-app help/about item; the note should specifically avoid implying that missing Copilot waiting, permission, compacting, or subagent animations are setup failures.
+**Rationale:** The design docs already document the event gap, but users troubleshooting the product do not necessarily read specs. Setting expectations in-product reduces false-negative setup diagnosis while preserving the richer Claude behavior.
+**Notes:** No backlog overlap. Kept despite modest value because it is safe, easy to validate, and targets a real asymmetry in `Docs/SPEC.md` and `Docs/State-Mapping.md`; avoid overbuilding a full help system for this narrow explanation.
+
+## IDEA-010
+**Title:** Quarantine corrupt global settings before writing defaults
+**Source:** engineering
+**Value:** 3
+**Feasibility:** 5
+**Safety:** 5
+**Composite:** 16
+**Status:** candidate
+**Description:** When `GlobalSettingsStore.loadSettings()` cannot decode or read `~/.vivarium/settings.json`, move the unreadable file to `settings.json.corrupt-<timestamp>` before returning defaults, mirroring the safer `SessionStore` corrupt-snapshot path. Cover both project pet resolution and opacity writes so a later save cannot silently overwrite recoverable user customizations.
+**Rationale:** `settings.json` stores user-facing pet assignments and window opacity, not disposable cache. The current load-defaults-then-save behavior can turn a transient bad write or manual edit into permanent data loss on the next mutation.
+**Notes:** No overlap with `IDEA-006`, which targets a separate future `~/.vivarium/projects.json` overrides file. Retained as a narrow high-safety correctness fix; it was not selected only because restored live session state has higher immediate user-visible impact.
+
+## IDEA-011
+**Title:** Move dropped pet-pack installation off the main UI path
+**Source:** engineering
+**Value:** 3
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 14
+**Status:** candidate
+**Description:** Move drag-and-drop pet pack extraction and validation off the AppKit drag callback so large zip extraction, `ditto`, and image decoding do not freeze the tank or menu bar. Keep existing validation and failure presentation behavior, but route the install through an async coordinator that performs slow filesystem/process work off the main actor and hops back to register the pack, preview it, or present an alert.
+**Rationale:** Pet packs are a user-facing extension point; if the menu-bar app blocks during installation, a normal pack drop can feel broken even when it eventually succeeds. The current path runs `PetLibrary.installPack` synchronously from `performDragOperation` and blocks on `Process.waitUntilExit()`.
+**Notes:** Separate from the rejected failure-feedback product idea: AppDelegate already presents install errors, but responsiveness during slow installs remains a real gap. Validate with an injected slow installer or equivalent seam so the drag/drop path can be proven to return promptly without depending on wall-clock zip performance.
