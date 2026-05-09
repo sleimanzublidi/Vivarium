@@ -323,6 +323,13 @@ final class SceneDirectorTests: XCTestCase {
     /// must un-dim it and lift it above the newest stack member, so the
     /// user can re-read what that pet last said without waiting for new
     /// agent activity.
+    ///
+    /// Dim now requires actual scene-space bubble overlap with a newer
+    /// balloon. Two pets at scale=1.0 in a 600-wide scene are spaced
+    /// ~208 px apart; their per-pet `bubbleMaxWidth` is ~224 px, so a
+    /// bubble that grows to its cap *does* share pixels with the
+    /// neighbour's bubble (≈16 px of overlap). To make the bubble grow
+    /// to that cap we feed it text long enough to fill the wrap width.
     func test_handlePetClick_undimsAndLiftsDimmedBalloon() {
         let director = SceneDirector(library: PetLibrary(),
                                      packsByID: ["sample-pet": validPack()],
@@ -331,14 +338,17 @@ final class SceneDirectorTests: XCTestCase {
         let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
                                       label: "repo", petId: "sample-pet")
         let t = Date()
+        // Long enough to fill the per-pet bubble cap so the two bubbles
+        // genuinely overlap horizontally (precondition for dim).
+        let longText = "this message is long enough to fill the bubble"
         var s1 = Session(agent: .claudeCode, sessionKey: "k1",
                          project: project, startedAt: t)
         s1.state = .waiting
-        s1.lastBalloon = BalloonText(text: "older", postedAt: t)
+        s1.lastBalloon = BalloonText(text: longText, postedAt: t)
         var s2 = Session(agent: .claudeCode, sessionKey: "k2",
                          project: project, startedAt: t.addingTimeInterval(1))
         s2.state = .waiting
-        s2.lastBalloon = BalloonText(text: "newer", postedAt: t.addingTimeInterval(1))
+        s2.lastBalloon = BalloonText(text: longText, postedAt: t.addingTimeInterval(1))
 
         director.addOrUpdate(session: s1)
         director.addOrUpdate(session: s2)

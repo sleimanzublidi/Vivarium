@@ -315,20 +315,25 @@ final class SceneDirectorBalloonTests: XCTestCase {
         XCTAssertFalse(pet.balloon.isHidden)
     }
 
-    /// With pets spaced apart enough that their balloons don't overlap
-    /// horizontally, both balloons stay visible at their natural positions
-    /// (no stagger shift). The older one is still dimmed though — dimming
-    /// is unconditional on age so the most-recent conversation is always
-    /// visually dominant, even when balloons sit side-by-side.
+    /// Two pets in a row whose bubbles genuinely share pixels: both
+    /// balloons stay visible at their natural Y (no stagger shift), the
+    /// newest stays at full alpha, and the older recedes via dim because
+    /// it competes for the same screen real estate. We feed both balloons
+    /// long text so each bubble grows to its per-pet cap (~pet width +
+    /// 2×overhang); at scale=1.0 with the default petGap that cap is wide
+    /// enough that adjacent bubbles overlap.
     func test_newBalloonOnOnePet_keepsBothVisibleAndDimsOlder() {
         let director = makeDirector()
         let t0 = Date()
+        // Long enough to push both bubbles to the per-pet width cap so
+        // they actually overlap in scene space (the dim trigger).
+        let longText = "this message is long enough to fill the bubble"
         director.addOrUpdate(session: makeSession(
             key: "a", lastEventAt: t0,
-            balloon: BalloonText(text: "alpha", postedAt: t0)))
+            balloon: BalloonText(text: longText, postedAt: t0)))
         director.addOrUpdate(session: makeSession(
             key: "b", lastEventAt: t0.addingTimeInterval(1),
-            balloon: BalloonText(text: "beta", postedAt: t0.addingTimeInterval(1))))
+            balloon: BalloonText(text: longText, postedAt: t0.addingTimeInterval(1))))
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
         let petB = pets.first { $0.sessionKey == "b" }!
@@ -340,7 +345,7 @@ final class SceneDirectorBalloonTests: XCTestCase {
                        "no overlap → no stagger shift on the older balloon")
         XCTAssertEqual(petA.balloon.targetStackAlpha,
                        SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
-                       "older balloons dim regardless of overlap")
+                       "older balloon dims because its bubble overlaps the newer one")
         XCTAssertEqual(petB.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
                        "newest balloon stays at full alpha")
     }
@@ -443,14 +448,19 @@ final class SceneDirectorBalloonStaggerTests: XCTestCase {
         return s
     }
 
-    /// Two pets, both with balloons: both stay at their natural Y; only
-    /// alpha and z differentiate them.
+    /// Two pets in a row whose bubbles share pixels: both stay at their
+    /// natural Y; only alpha (newest=1.0, older=dim) and z differentiate
+    /// them. We feed long text so each bubble grows to the per-pet cap;
+    /// at petScale=0.5 the cap is wider than the inter-slot spacing, so
+    /// adjacent bubbles genuinely overlap (the dim trigger).
     func test_twoBalloons_neitherShifts_olderDimmedAndBelow() {
         let director = makeDirector(petScale: 0.5)
         let t = Date()
-        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        // Long enough to fill the per-pet bubble cap so the bubbles overlap.
+        let longText = "this message is long enough to fill the bubble"
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: longText))
         director.addOrUpdate(session: makeSession(
-            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+            key: "b", at: t.addingTimeInterval(1), text: longText))
 
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
@@ -465,21 +475,28 @@ final class SceneDirectorBalloonStaggerTests: XCTestCase {
                        "newest renders at full alpha")
         XCTAssertEqual(petA.balloon.targetStackAlpha,
                        SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
-                       "older balloon recedes via dim")
+                       "older balloon recedes via dim because it overlaps the newer one")
         XCTAssertGreaterThan(petB.balloon.zPosition, petA.balloon.zPosition,
                              "newest paints in front of older balloons")
     }
 
-    /// Three balloons: every older one dims; their z-order matches age
-    /// (newest highest). No vertical shift on any of them.
+    /// Three balloons whose bubbles all overlap with at least one newer
+    /// neighbour: every older one dims, and z-order matches age (newest
+    /// highest, oldest lowest). No vertical shift on any of them. We use
+    /// long text to push every bubble to its per-pet cap so adjacent
+    /// bubbles share pixels (the dim trigger).
     func test_threeBalloons_zOrderMatchesAge() {
         let director = makeDirector(petScale: 0.5)
         let t = Date()
-        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        // Long enough that adjacent bubbles overlap horizontally; A is
+        // not adjacent to C but it IS adjacent to B (newer than A), so A
+        // still dims under "overlap with any strictly-newer balloon".
+        let longText = "this message is long enough to fill the bubble"
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: longText))
         director.addOrUpdate(session: makeSession(
-            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+            key: "b", at: t.addingTimeInterval(1), text: longText))
         director.addOrUpdate(session: makeSession(
-            key: "c", at: t.addingTimeInterval(2), text: "gamma"))
+            key: "c", at: t.addingTimeInterval(2), text: longText))
 
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
@@ -491,9 +508,11 @@ final class SceneDirectorBalloonStaggerTests: XCTestCase {
         XCTAssertEqual(petC.balloon.position.y, 0, accuracy: 0.001)
         XCTAssertEqual(petC.balloon.targetStackAlpha, 1.0, accuracy: 0.001)
         XCTAssertEqual(petB.balloon.targetStackAlpha,
-                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001)
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "B overlaps newer C → dim")
         XCTAssertEqual(petA.balloon.targetStackAlpha,
-                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001)
+                       SceneDirector.balloonDimmedAlpha, accuracy: 0.001,
+                       "A overlaps newer B → dim")
         XCTAssertGreaterThan(petC.balloon.zPosition, petB.balloon.zPosition)
         XCTAssertGreaterThan(petB.balloon.zPosition, petA.balloon.zPosition,
                              "older balloons step further down in z")
@@ -501,12 +520,18 @@ final class SceneDirectorBalloonStaggerTests: XCTestCase {
 
     /// When the newest pet's state goes idle (its balloon dismisses), the
     /// older balloon becomes the new "newest" and should regain full alpha.
+    /// We use long text so the two bubbles overlap initially (the
+    /// precondition that A is dimmed while B is on screen).
     func test_dismissingNewest_undimsOlderBalloon() {
         let director = makeDirector(petScale: 0.5)
         let t = Date()
-        director.addOrUpdate(session: makeSession(key: "a", at: t, text: "alpha"))
+        // Long enough that A's and B's bubbles share pixels — without
+        // overlap the new "dim only on overlap" rule would leave A at
+        // full alpha already, defeating the precondition.
+        let longText = "this message is long enough to fill the bubble"
+        director.addOrUpdate(session: makeSession(key: "a", at: t, text: longText))
         director.addOrUpdate(session: makeSession(
-            key: "b", at: t.addingTimeInterval(1), text: "beta"))
+            key: "b", at: t.addingTimeInterval(1), text: longText))
 
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let petA = pets.first { $0.sessionKey == "a" }!
@@ -520,8 +545,8 @@ final class SceneDirectorBalloonStaggerTests: XCTestCase {
         var bIdle = makeSession(key: "b",
                                 state: .idle,
                                 at: t.addingTimeInterval(2),
-                                text: "beta")
-        bIdle.lastBalloon = BalloonText(text: "beta", postedAt: t.addingTimeInterval(1))
+                                text: longText)
+        bIdle.lastBalloon = BalloonText(text: longText, postedAt: t.addingTimeInterval(1))
         director.addOrUpdate(session: bIdle)
 
         XCTAssertEqual(petA.balloon.targetStackAlpha, 1.0, accuracy: 0.001,
