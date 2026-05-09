@@ -22,6 +22,7 @@ struct Session: Equatable, Codable, Sendable {
     var lastEventAt: Date
     var lastBalloon: BalloonText?
     var subagentDepth: Int
+    var headlessChildCount: Int
 
     init(agent: AgentType,
          sessionKey: String,
@@ -36,5 +37,6 @@ struct Session: Equatable, Codable, Sendable {
         self.lastEventAt = startedAt
         self.lastBalloon = nil
         self.subagentDepth = 0
+        self.headlessChildCount = 0
     }
 }

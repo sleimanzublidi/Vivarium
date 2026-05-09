@@ -29,6 +29,69 @@ struct AgentEvent: Equatable, Sendable {
     let kind: AgentEventKind
     let detail: String?
     let at: Date
+    let processInfo: AgentProcessInfo?
+
+    init(agent: AgentType,
+         sessionKey: String,
+         cwd: URL,
+         kind: AgentEventKind,
+         detail: String?,
+         at: Date,
+         processInfo: AgentProcessInfo? = nil)
+    {
+        self.agent = agent
+        self.sessionKey = sessionKey
+        self.cwd = cwd
+        self.kind = kind
+        self.detail = detail
+        self.at = at
+        self.processInfo = processInfo
+    }
+}
+
+struct ProcessAncestor: Equatable, Codable, Sendable {
+    let pid: Int
+    let parentPID: Int?
+    let executableName: String?
+    let executablePath: String?
+    let arguments: [String]
+    let startedAt: TimeInterval?
+
+    init(pid: Int,
+         parentPID: Int?,
+         executableName: String?,
+         executablePath: String?,
+         arguments: [String] = [],
+         startedAt: TimeInterval? = nil)
+    {
+        self.pid = pid
+        self.parentPID = parentPID
+        self.executableName = executableName
+        self.executablePath = executablePath
+        self.arguments = arguments
+        self.startedAt = startedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pid
+        case parentPID = "ppid"
+        case executableName = "command"
+        case executablePath = "path"
+        case arguments = "args"
+        case startedAt
+    }
+}
+
+struct AgentProcessInfo: Equatable, Codable, Sendable {
+    let hookPID: Int?
+    let hookParentPID: Int?
+    let ancestors: [ProcessAncestor]
+
+    init(hookPID: Int?, hookParentPID: Int?, ancestors: [ProcessAncestor] = []) {
+        self.hookPID = hookPID
+        self.hookParentPID = hookParentPID
+        self.ancestors = ancestors
+    }
 }
 
 // MARK: - Codable

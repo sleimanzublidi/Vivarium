@@ -49,7 +49,7 @@ Copilot CLI (.github/hooks/*.json)                  ─┘                      
                                                                                                └─ MenuBarItem (NSStatusItem)
 ```
 
-The notify helper is a small standalone Swift binary. It reads stdin, wraps it in an envelope (`agent`, `event`, `pid`, `ppid`, `receivedAt`, `payload`), and writes one NDJSON line to `~/.vivarium/sock`. Hard 200 ms timeouts on connect and write; drop on any failure; `exit 0` always so the agent is never blocked.
+The notify helper is a small standalone Swift binary. It reads stdin, wraps it in an envelope (`agent`, `event`, `pid`, `ppid`, `ancestors`, `receivedAt`, `payload`), and writes one NDJSON line to `~/.vivarium/sock`. `ancestors` is a capped process-chain snapshot used to connect headless child workers back to their interactive parent session. Hard 200 ms timeouts on connect and write; drop on any failure; `exit 0` always so the agent is never blocked.
 
 ## 4. Agent hook integration
 
@@ -88,7 +88,7 @@ All adapters return one of these `AgentEvent` kinds (or `nil` for unrecognized/m
 | `subagentStart` / `subagentEnd` | CC: `SubagentStart` / `SubagentStop` |
 | `error(message)` | CC: `StopFailure`; Copilot: `errorOccurred` |
 
-Each event also carries: `agent`, `sessionKey`, `cwd`, optional `detail` (e.g. the bash command, an error message, a tool's response summary), and `at`.
+Each event also carries: `agent`, `sessionKey`, `cwd`, optional `detail` (e.g. the bash command, an error message, a tool's response summary), `at`, and optional process metadata from the hook envelope.
 
 Adapters are pure: `(rawJSON, receivedAt) -> AgentEvent?`. The Copilot adapter additionally maintains a small in-memory map of `(cwd, ppid) -> sessionKey` to stamp synthesized keys across an episode.
 
@@ -111,6 +111,8 @@ State transitions on incoming events:
 - `error` → `.failed` with the error message.
 
 The store is **lenient**: any non-start event for an unknown session creates the session implicitly. This catches events that arrive before `SessionStart` (or after a missed start because the app wasn't running yet).
+
+Claude Code child workers are aliased onto their interactive parent pet when process ancestry shows a child `claude` process descended from a known parent `claude` process. Child events update the parent session state and balloon; child `SessionEnd` only clears the child-worker count and never removes the parent pet. If the parent has not been seen yet, the child is temporarily shown as its own pet and retroactively folded into the parent once the parent process is registered.
 
 ### Project resolution
 

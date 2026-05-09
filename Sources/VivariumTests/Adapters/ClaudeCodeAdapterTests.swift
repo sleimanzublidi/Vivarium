@@ -27,6 +27,16 @@ final class ClaudeCodeAdapterTests: XCTestCase {
         XCTAssertEqual(e.kind, .sessionStart)
     }
 
+    func test_processInfo_decodesEnvelopePIDsAndAncestors() throws {
+        let e = try XCTUnwrap(try adapt("session-start-process"))
+        XCTAssertEqual(e.processInfo?.hookPID, 12345)
+        XCTAssertEqual(e.processInfo?.hookParentPID, 12000)
+        XCTAssertEqual(e.processInfo?.ancestors.count, 2)
+        XCTAssertEqual(e.processInfo?.ancestors.last?.pid, 12000)
+        XCTAssertEqual(e.processInfo?.ancestors.last?.executableName, "claude")
+        XCTAssertEqual(e.processInfo?.ancestors.last?.startedAt, 1_780_000_000.0)
+    }
+
     func test_preToolUseBash_isToolStart() throws {
         let e = try XCTUnwrap(try adapt("pre-tool-use-bash"))
         XCTAssertEqual(e.kind, .toolStart(name: "Bash"))

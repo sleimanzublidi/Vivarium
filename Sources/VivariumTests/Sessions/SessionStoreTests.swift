@@ -17,6 +17,53 @@ final class SessionStoreTests: XCTestCase {
                              now: { clockRef.now })
     }
 
+    private func claudeProcess(pid: Int,
+                               parentPID: Int?,
+                               startedAt: TimeInterval,
+                               args: [String]? = nil) -> ProcessAncestor
+    {
+        ProcessAncestor(
+            pid: pid,
+            parentPID: parentPID,
+            executableName: "claude",
+            executablePath: "/Users/me/.claude-cli/CurrentVersion/claude",
+            arguments: args ?? ["/Users/me/.claude-cli/CurrentVersion/claude"],
+            startedAt: startedAt
+        )
+    }
+
+    private func nonClaudeProcess(pid: Int, parentPID: Int?, name: String) -> ProcessAncestor {
+        ProcessAncestor(pid: pid,
+                        parentPID: parentPID,
+                        executableName: name,
+                        executablePath: "/usr/bin/\(name)",
+                        arguments: [name],
+                        startedAt: TimeInterval(pid))
+    }
+
+    private func processInfo(_ ancestors: [ProcessAncestor]) -> AgentProcessInfo {
+        AgentProcessInfo(hookPID: ancestors.first?.pid,
+                         hookParentPID: ancestors.first?.parentPID,
+                         ancestors: ancestors)
+    }
+
+    private func parentClaudeProcessInfo() -> AgentProcessInfo {
+        processInfo([
+            nonClaudeProcess(pid: 10, parentPID: 20, name: "VivariumNotify"),
+            claudeProcess(pid: 100, parentPID: 1, startedAt: 1_000),
+        ])
+    }
+
+    private func childClaudeProcessInfo() -> AgentProcessInfo {
+        processInfo([
+            nonClaudeProcess(pid: 11, parentPID: 30, name: "VivariumNotify"),
+            claudeProcess(pid: 200, parentPID: 201, startedAt: 2_000,
+                          args: ["/Users/me/.claude-cli/CurrentVersion/claude", "-p", "summarize"]),
+            nonClaudeProcess(pid: 201, parentPID: 100, name: "orc"),
+            claudeProcess(pid: 100, parentPID: 1, startedAt: 1_000),
+        ])
+    }
+
     func test_sessionStart_createsSessionInIdle() async {
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),
@@ -401,6 +448,125 @@ final class SessionStoreTests: XCTestCase {
                                  kind: .subagentEnd, detail: nil, at: clock.now))
         snap = await store.snapshot()
         XCTAssertEqual(snap.first?.subagentDepth, 1)
+    }
+
+    func test_childClaudeSessionStart_aliasesToParentPet() async {
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "parent",
+                                cwd: URL(fileURLWithPath: "/tmp/project"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: parentClaudeProcessInfo()))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.map(\.sessionKey), ["parent"])
+        XCTAssertEqual(snap.first?.headlessChildCount, 1)
+    }
+
+    func test_childClaudeToolEvent_updatesParentPet() async {
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "parent",
+                                cwd: URL(fileURLWithPath: "/tmp/project"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: parentClaudeProcessInfo()))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .toolStart(name: "Bash"),
+                                detail: "git status --short",
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.count, 1)
+        XCTAssertEqual(snap.first?.sessionKey, "parent")
+        XCTAssertEqual(snap.first?.state, .running)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
+    }
+
+    func test_childClaudeSessionEnd_doesNotRemoveParentPet() async {
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "parent",
+                                cwd: URL(fileURLWithPath: "/tmp/project"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: parentClaudeProcessInfo()))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .sessionEnd(reason: "exit"),
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.map(\.sessionKey), ["parent"])
+        XCTAssertEqual(snap.first?.headlessChildCount, 0)
+    }
+
+    func test_childClaudeWithoutKnownParent_stillCreatesOwnPet() async {
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.map(\.sessionKey), ["child"])
+        XCTAssertEqual(snap.first?.headlessChildCount, 0)
+    }
+
+    func test_childClaudeStartedBeforeParent_isRetroactivelyAliased() async {
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "child",
+                                cwd: URL(fileURLWithPath: "/tmp/project-worktree"),
+                                kind: .toolStart(name: "Bash"),
+                                detail: "git status --short",
+                                at: clock.now,
+                                processInfo: childClaudeProcessInfo()))
+        let initialSnapshot = await store.snapshot()
+        XCTAssertEqual(initialSnapshot.map(\.sessionKey), ["child"])
+
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "parent",
+                                cwd: URL(fileURLWithPath: "/tmp/project"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now,
+                                processInfo: parentClaudeProcessInfo()))
+
+        let snap = await store.snapshot()
+        XCTAssertEqual(snap.map(\.sessionKey), ["parent"])
+        XCTAssertEqual(snap.first?.headlessChildCount, 1)
+        XCTAssertEqual(snap.first?.state, .running)
+        XCTAssertEqual(snap.first?.lastBalloon?.text, "Bash(git)")
     }
 
     // MARK: - Lenient session creation (sessions that started before the app launched)

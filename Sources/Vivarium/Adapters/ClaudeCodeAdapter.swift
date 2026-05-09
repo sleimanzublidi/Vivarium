@@ -10,6 +10,9 @@ struct ClaudeCodeAdapter: EventAdapter {
 
     private struct Envelope: Decodable {
         let event: String
+        let pid: Int?
+        let ppid: Int?
+        let ancestors: [ProcessAncestor]?
         let payload: Payload
     }
 
@@ -102,7 +105,10 @@ struct ClaudeCodeAdapter: EventAdapter {
             cwd: cwd,
             kind: k,
             detail: detail,
-            at: receivedAt
+            at: receivedAt,
+            processInfo: AgentProcessInfo(hookPID: env.pid,
+                                          hookParentPID: env.ppid,
+                                          ancestors: env.ancestors ?? [])
         )
     }
 }

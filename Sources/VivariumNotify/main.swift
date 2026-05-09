@@ -59,6 +59,7 @@ let envelope: [String: Any] = [
     "payload": payloadAny,
     "pid": getpid(),
     "ppid": getppid(),
+    "ancestors": processAncestors(startingAt: getpid()),
     "receivedAt": Date().timeIntervalSince1970,
 ]
 guard let line = try? JSONSerialization.data(withJSONObject: envelope) else { exit(0) }
@@ -140,3 +141,123 @@ while !remaining.isEmpty {
 }
 
 exit(0)
+
+private func processAncestors(startingAt pid: pid_t, maxDepth: Int = 12) -> [[String: Any]] {
+    var result: [[String: Any]] = []
+    var seen = Set<pid_t>()
+    var current = pid
+
+    for _ in 0..<maxDepth {
+        guard current > 1, seen.insert(current).inserted,
+              let snapshot = processSnapshot(pid: current)
+        else { break }
+
+        result.append(snapshot)
+        guard let parent = snapshot["ppid"] as? Int, parent > 1 else { break }
+        current = pid_t(parent)
+    }
+
+    return result
+}
+
+private func processSnapshot(pid: pid_t) -> [String: Any]? {
+    guard let info = processKernelInfo(pid: pid) else { return nil }
+    let parentPID = Int(info.kp_eproc.e_ppid)
+
+    var snapshot: [String: Any] = [
+        "pid": Int(pid),
+        "ppid": parentPID,
+        "command": processCommandName(from: info),
+        "args": processArguments(pid: pid),
+    ]
+
+    if let path = processExecutablePath(pid: pid), !path.isEmpty {
+        snapshot["path"] = path
+    }
+
+    let startedAt = TimeInterval(info.kp_proc.p_starttime.tv_sec)
+        + TimeInterval(info.kp_proc.p_starttime.tv_usec) / 1_000_000
+    if startedAt > 0 {
+        snapshot["startedAt"] = startedAt
+    }
+
+    return snapshot
+}
+
+private func processKernelInfo(pid: pid_t) -> kinfo_proc? {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0,
+          size >= MemoryLayout<kinfo_proc>.stride,
+          info.kp_proc.p_pid == pid
+    else {
+        return nil
+    }
+    return info
+}
+
+private func processCommandName(from info: kinfo_proc) -> String {
+    var command = info.kp_proc.p_comm
+    let capacity = MemoryLayout.size(ofValue: command)
+    return withUnsafePointer(to: &command) { pointer in
+        pointer.withMemoryRebound(to: CChar.self,
+                                  capacity: capacity) { cString in
+            String(cString: cString)
+        }
+    }
+}
+
+private func processExecutablePath(pid: pid_t) -> String? {
+    var buffer = [CChar](repeating: 0, count: 4096)
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    guard length > 0 else { return nil }
+    return String(cString: buffer)
+}
+
+private func processArguments(pid: pid_t) -> [String] {
+    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    var size: size_t = 0
+    guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0,
+          size > MemoryLayout<Int32>.size
+    else {
+        return []
+    }
+
+    var buffer = [UInt8](repeating: 0, count: size)
+    guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0 else {
+        return []
+    }
+
+    var argc: Int32 = 0
+    withUnsafeMutableBytes(of: &argc) { argcBytes in
+        buffer.withUnsafeBytes { sourceBytes in
+            guard let source = sourceBytes.baseAddress,
+                  let destination = argcBytes.baseAddress
+            else { return }
+            memcpy(destination, source, MemoryLayout<Int32>.size)
+        }
+    }
+
+    let stringLimit = max(0, Int(argc) + 1)
+    var result: [String] = []
+    var current: [UInt8] = []
+
+    for byte in buffer.dropFirst(MemoryLayout<Int32>.size) {
+        if byte == 0 {
+            if !current.isEmpty {
+                result.append(String(decoding: current, as: UTF8.self))
+                current.removeAll()
+                if result.count >= stringLimit { break }
+            }
+        } else {
+            current.append(byte)
+        }
+    }
+
+    if !current.isEmpty, result.count < stringLimit {
+        result.append(String(decoding: current, as: UTF8.self))
+    }
+
+    return result
+}

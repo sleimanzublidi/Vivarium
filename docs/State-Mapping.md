@@ -64,6 +64,7 @@ struct AgentEvent {
     let kind: AgentEventKind
     let detail: String?
     let at: Date
+    let processInfo: AgentProcessInfo?
 }
 ```
 
@@ -94,6 +95,10 @@ The states `.runningRight`, `.runningLeft`, `.waving`, `.jumping` are not reache
 ### Lenient mode
 
 If a non-start event arrives for an unknown session (e.g. the app started mid-session, or recovered from a crash), `SessionStore.apply` synthesizes a session from the event rather than dropping it. The state then comes from the same table above.
+
+### Claude child-worker aliasing
+
+Claude workers spawned by a parent session (for example via Orc in a separate worktree) can emit their own `session_id`. `VivariumNotify` includes a capped process ancestor chain, and `SessionStore` maps Claude-looking ancestor PIDs to known sessions. If a child session descends from a known parent Claude process, its events are re-keyed to the parent session so no extra pet appears. The child `SessionEnd` clears only the child-worker count; it does not remove the parent pet. If the child starts before the parent has been indexed, the store can retroactively fold that temporary child pet into the parent once the parent PID is seen.
 
 ### Agent-idle auto-revert
 

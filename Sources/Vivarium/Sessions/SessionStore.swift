@@ -13,6 +13,10 @@ actor SessionStore {
     private var idleTimers: [String: Task<Void, Never>] = [:]
     private var temporaryStateTimers: [String: Task<Void, Never>] = [:]
     private var temporaryFallbackStates: [String: PetState] = [:]
+    private var processSessionKeysByPID: [Int: ProcessSessionRegistration] = [:]
+    private var sessionProcessPIDs: [String: Set<Int>] = [:]
+    private var sessionProcessAncestors: [String: [ProcessAncestor]] = [:]
+    private var childSessionAliases: [String: ChildSessionAlias] = [:]
     private var sweepTask: Task<Void, Never>?
 
     /// - parameters:
@@ -92,9 +96,25 @@ actor SessionStore {
     }
 
     func apply(_ event: AgentEvent) {
+        if let alias = resolveChildAlias(for: event) {
+            applyAliasedChildEvent(event, parentKey: alias.parentKey, isNewAlias: alias.isNew)
+            return
+        }
+
+        applyDirect(event)
+        if !isSessionEnd(event.kind) {
+            registerProcessPIDs(from: event.processInfo,
+                                to: event.sessionKey,
+                                onlyWhenUnambiguousRoot: true)
+            retroactivelyAliasChildren(to: event.sessionKey)
+        }
+    }
+
+    private func applyDirect(_ event: AgentEvent) {
         switch event.kind {
         case .sessionStart:
             cancelTemporaryState(for: event.sessionKey)
+            sessionProcessAncestors[event.sessionKey] = event.processInfo?.ancestors ?? []
             let project = resolver.resolve(cwd: event.cwd, agent: event.agent)
             let s = Session(agent: event.agent,
                             sessionKey: event.sessionKey,
@@ -107,6 +127,7 @@ actor SessionStore {
             cancelIdleTimer(for: event.sessionKey)
             cancelTemporaryState(for: event.sessionKey)
             if let s = sessions.removeValue(forKey: event.sessionKey) {
+                cleanupSessionProcessMetadata(for: event.sessionKey)
                 emit(.removed(s))
             }
         default:
@@ -119,6 +140,7 @@ actor SessionStore {
                 s = existing
                 isNew = false
             } else {
+                sessionProcessAncestors[event.sessionKey] = event.processInfo?.ancestors ?? []
                 let project = resolver.resolve(cwd: event.cwd, agent: event.agent)
                 s = Session(agent: event.agent,
                             sessionKey: event.sessionKey,
@@ -160,6 +182,209 @@ actor SessionStore {
             sessions[event.sessionKey] = s
             emit(isNew ? .added(s) : .changed(s))
             rescheduleIdleTimer(for: event.sessionKey)
+        }
+    }
+
+    // MARK: - Claude child-session aliasing
+
+    private func resolveChildAlias(for event: AgentEvent) -> (parentKey: String, isNew: Bool)? {
+        if let existing = childSessionAliases[event.sessionKey] {
+            return (existing.parentKey, false)
+        }
+
+        guard event.agent == .claudeCode,
+              !isSessionEnd(event.kind),
+              let parentKey = knownParentSessionKey(for: event),
+              sessions[parentKey] != nil
+        else {
+            return nil
+        }
+
+        return (parentKey, true)
+    }
+
+    private func applyAliasedChildEvent(_ event: AgentEvent, parentKey: String, isNewAlias: Bool) {
+        let childPIDs = registerProcessPIDs(from: event.processInfo,
+                                            to: parentKey,
+                                            onlyWhenUnambiguousRoot: false)
+        if isNewAlias {
+            childSessionAliases[event.sessionKey] = ChildSessionAlias(parentKey: parentKey,
+                                                                      lastSeenAt: event.at,
+                                                                      processPIDs: childPIDs)
+            incrementHeadlessChildCount(for: parentKey, at: event.at)
+        } else {
+            var alias = childSessionAliases[event.sessionKey]
+                ?? ChildSessionAlias(parentKey: parentKey, lastSeenAt: event.at, processPIDs: [])
+            alias.lastSeenAt = event.at
+            alias.processPIDs.formUnion(childPIDs)
+            childSessionAliases[event.sessionKey] = alias
+        }
+
+        switch event.kind {
+        case .sessionStart:
+            rescheduleIdleTimer(for: parentKey)
+        case .sessionEnd:
+            finishChildAlias(childKey: event.sessionKey, at: event.at)
+        default:
+            applyDirect(event.rekeyed(to: parentKey))
+        }
+    }
+
+    private func knownParentSessionKey(for event: AgentEvent) -> String? {
+        guard let processInfo = event.processInfo else { return nil }
+        for ancestor in claudeAncestors(in: processInfo) {
+            guard let registration = processSessionKeysByPID[ancestor.pid],
+                  registration.sessionKey != event.sessionKey,
+                  registration.matches(ancestor),
+                  sessions[registration.sessionKey] != nil
+            else {
+                continue
+            }
+            return registration.sessionKey
+        }
+        return nil
+    }
+
+    @discardableResult
+    private func registerProcessPIDs(from processInfo: AgentProcessInfo?,
+                                     to sessionKey: String,
+                                     onlyWhenUnambiguousRoot: Bool) -> Set<Int>
+    {
+        guard let processInfo else { return [] }
+        let ancestors = claudeAncestors(in: processInfo)
+        guard !ancestors.isEmpty else { return [] }
+        guard !onlyWhenUnambiguousRoot || ancestors.count == 1 else { return [] }
+
+        var registered = Set<Int>()
+        for ancestor in ancestors {
+            let prior = processSessionKeysByPID[ancestor.pid]
+            if let priorSessionKey = prior?.sessionKey, priorSessionKey != sessionKey {
+                sessionProcessPIDs[priorSessionKey]?.remove(ancestor.pid)
+            }
+            processSessionKeysByPID[ancestor.pid] = ProcessSessionRegistration(
+                sessionKey: sessionKey,
+                startedAt: ancestor.startedAt
+            )
+            sessionProcessPIDs[sessionKey, default: []].insert(ancestor.pid)
+            if prior?.sessionKey != sessionKey || prior?.startedAt != ancestor.startedAt {
+                registered.insert(ancestor.pid)
+            }
+        }
+        return registered
+    }
+
+    private func retroactivelyAliasChildren(to parentKey: String) {
+        guard let parent = sessions[parentKey], parent.agent == .claudeCode else { return }
+        let parentRegistrations = sessionProcessPIDs[parentKey] ?? []
+        guard !parentRegistrations.isEmpty else { return }
+
+        let candidates = sessionProcessAncestors.compactMap { childKey, ancestors -> String? in
+            guard childSessionAliases[childKey] == nil,
+                  let child = sessions[childKey],
+                  child.agent == .claudeCode,
+                  ancestors.contains(where: { parentRegistrations.contains($0.pid) })
+            else {
+                return nil
+            }
+            return childKey
+        }
+
+        for childKey in candidates where childKey != parentKey {
+            aliasExistingSession(childKey: childKey, to: parentKey)
+        }
+    }
+
+    private func aliasExistingSession(childKey: String, to parentKey: String) {
+        guard let child = sessions.removeValue(forKey: childKey),
+              var parent = sessions[parentKey]
+        else {
+            return
+        }
+
+        cancelIdleTimer(for: childKey)
+        cancelTemporaryState(for: childKey)
+
+        let childAncestors = sessionProcessAncestors[childKey] ?? []
+        let childPIDs = registerProcessPIDs(from: AgentProcessInfo(hookPID: nil,
+                                                                   hookParentPID: nil,
+                                                                   ancestors: childAncestors),
+                                            to: parentKey,
+                                            onlyWhenUnambiguousRoot: false)
+        childSessionAliases[childKey] = ChildSessionAlias(parentKey: parentKey,
+                                                          lastSeenAt: child.lastEventAt,
+                                                          processPIDs: childPIDs)
+        parent.headlessChildCount += max(1, child.headlessChildCount + 1)
+        parent.subagentDepth += child.subagentDepth
+        if child.state != .idle, child.lastEventAt >= parent.lastEventAt || parent.state == .idle {
+            parent.state = child.state
+            parent.lastEventAt = child.lastEventAt
+            parent.lastBalloon = child.lastBalloon ?? parent.lastBalloon
+        }
+
+        sessions[parentKey] = parent
+        sessionProcessAncestors.removeValue(forKey: childKey)
+        sessionProcessPIDs.removeValue(forKey: childKey)
+        emit(.removed(child))
+        emit(.changed(parent))
+        rescheduleIdleTimer(for: parentKey)
+    }
+
+    private func incrementHeadlessChildCount(for parentKey: String, at: Date) {
+        guard var parent = sessions[parentKey] else { return }
+        parent.headlessChildCount += 1
+        parent.lastEventAt = max(parent.lastEventAt, at)
+        sessions[parentKey] = parent
+        emit(.changed(parent))
+    }
+
+    private func finishChildAlias(childKey: String, at: Date) {
+        guard let alias = childSessionAliases.removeValue(forKey: childKey) else { return }
+        for pid in alias.processPIDs {
+            processSessionKeysByPID.removeValue(forKey: pid)
+            sessionProcessPIDs[alias.parentKey]?.remove(pid)
+        }
+        guard var parent = sessions[alias.parentKey] else { return }
+        parent.headlessChildCount = max(0, parent.headlessChildCount - 1)
+        parent.lastEventAt = max(parent.lastEventAt, at)
+        sessions[alias.parentKey] = parent
+        emit(.changed(parent))
+        rescheduleIdleTimer(for: alias.parentKey)
+    }
+
+    private func cleanupSessionProcessMetadata(for sessionKey: String) {
+        for pid in sessionProcessPIDs.removeValue(forKey: sessionKey) ?? [] {
+            processSessionKeysByPID.removeValue(forKey: pid)
+        }
+        sessionProcessAncestors.removeValue(forKey: sessionKey)
+
+        let childKeys = childSessionAliases
+            .filter { $0.value.parentKey == sessionKey || $0.key == sessionKey }
+            .map(\.key)
+        for childKey in childKeys {
+            if let alias = childSessionAliases.removeValue(forKey: childKey) {
+                for pid in alias.processPIDs {
+                    processSessionKeysByPID.removeValue(forKey: pid)
+                }
+            }
+        }
+    }
+
+    private func isSessionEnd(_ kind: AgentEventKind) -> Bool {
+        if case .sessionEnd = kind { return true }
+        return false
+    }
+
+    private func claudeAncestors(in processInfo: AgentProcessInfo) -> [ProcessAncestor] {
+        processInfo.ancestors.filter(Self.isClaudeProcess)
+    }
+
+    private static func isClaudeProcess(_ ancestor: ProcessAncestor) -> Bool {
+        let candidates = ([ancestor.executableName, ancestor.executablePath].compactMap { $0 }
+            + ancestor.arguments)
+        return candidates.contains { candidate in
+            let lowered = candidate.lowercased()
+            if URL(fileURLWithPath: lowered).lastPathComponent == "claude" { return true }
+            return lowered.contains("/.claude-cli/") || lowered.contains("/claude-code/")
         }
     }
 
@@ -266,12 +491,41 @@ actor SessionStore {
             sessions.removeValue(forKey: key)
             cancelIdleTimer(for: key)
             cancelTemporaryState(for: key)
+            cleanupSessionProcessMetadata(for: key)
             emit(.removed(s))
         }
     }
 
     private func emit(_ e: SessionStoreEvent) {
         for c in continuations.values { c.yield(e) }
+    }
+}
+
+private struct ProcessSessionRegistration: Equatable {
+    let sessionKey: String
+    let startedAt: TimeInterval?
+
+    func matches(_ ancestor: ProcessAncestor) -> Bool {
+        guard let startedAt, let ancestorStartedAt = ancestor.startedAt else { return true }
+        return abs(startedAt - ancestorStartedAt) < 0.001
+    }
+}
+
+private struct ChildSessionAlias: Equatable {
+    let parentKey: String
+    var lastSeenAt: Date
+    var processPIDs: Set<Int>
+}
+
+private extension AgentEvent {
+    func rekeyed(to sessionKey: String) -> AgentEvent {
+        AgentEvent(agent: agent,
+                   sessionKey: sessionKey,
+                   cwd: cwd,
+                   kind: kind,
+                   detail: detail,
+                   at: at,
+                   processInfo: processInfo)
     }
 }
 
