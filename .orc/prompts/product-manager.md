@@ -16,7 +16,7 @@ Do not scan or reprocess old timestamped files in `{{worktree_path}}/.orc/self-i
 
 **You do not read source code.** Your inputs are the codebase summary above plus user-facing surfaces only:
 - README.md, install/setup scripts visible to the user (`Scripts/setup.sh` flow descriptions, not the script's internals), error messages and user-facing copy strings, screenshots if present.
-- Stated intent: ROADMAP.md, docs/SPEC.md, CHANGELOG.md, TODO.md, BACKLOG.md, docs/roadmap.md, docs/backlog.md, docs/specs/*. Read these for context, but do NOT pad ideas with "the roadmap says do X" — a roadmap entry is an idea source only when you can also articulate the user friction it solves.
+- Stated intent: ROADMAP.md, Docs/SPEC.md, CHANGELOG.md, TODO.md, BACKLOG.md, Docs/roadmap.md, Docs/backlog.md, Docs/specs/*. Read these for context, but do NOT pad ideas with "the roadmap says do X" — a roadmap entry is an idea source only when you can also articulate the user friction it solves.
 - Menu items, status surfaces, and UX behaviors described in the codebase summary.
 
 Do not open `Sources/`, `*.swift`, `*.h`, build scripts, or test files. If you need an internal detail you don't have, that's a sign the idea is implementation-shaped and belongs to the principal engineer, not you.

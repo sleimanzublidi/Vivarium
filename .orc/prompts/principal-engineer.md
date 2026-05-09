@@ -22,7 +22,7 @@ Do not scan or reprocess old timestamped files in `{{worktree_path}}/.orc/self-i
 - Performance gaps with measurable user impact — include a current estimate and target, and the command/test that would prove the delta.
 - Architectural risks that are likely to bite a future autonomous change (state shared across actors without isolation, hidden coupling between modules).
 
-Roadmap and planning documents (README.md, ROADMAP.md, docs/SPEC.md, CHANGELOG.md, TODO.md, BACKLOG.md, docs/roadmap.md, docs/specs/*) are **context only** — read them so you don't propose work that overlaps with already-planned items, but do NOT use "the roadmap mentions X" as a justification on its own. Every engineering idea must be grounded in something concrete you found *in the code*: a file path, a line range, a function name, a test that would have caught the bug if it existed.
+Roadmap and planning documents (README.md, ROADMAP.md, Docs/SPEC.md, CHANGELOG.md, TODO.md, BACKLOG.md, Docs/roadmap.md, Docs/specs/*) are **context only** — read them so you don't propose work that overlaps with already-planned items, but do NOT use "the roadmap mentions X" as a justification on its own. Every engineering idea must be grounded in something concrete you found *in the code*: a file path, a line range, a function name, a test that would have caught the bug if it existed.
 
 Produce a top {{idea_count}} ranked set of engineering ideas for this run. Focus on technical changes that improve user outcomes or make future autonomous improvements safer:
 - Reliability and correctness issues users can hit
