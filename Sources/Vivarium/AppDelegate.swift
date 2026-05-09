@@ -21,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // private var alertNotifier: SystemSessionAlertNotifier!
     private var debugGridScene: DebugGridScene?
     private var debugGridPacks: [PetPack] = []
+    #if DEBUG
+    private var debugPanelController: DebugPanelController?
+    private var debugScenarioRunner: DebugScenarioRunner?
+    #endif
     private var activeSessionsSnapshot = ActiveSessionsSnapshot()
     private let petRegistry = InstalledPetRegistry()
     private let normalizer = EventNormalizer(adapters: [
@@ -115,6 +119,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.startSocketServer(store: store, normalizer: normalizer)
             }
         }
+
+        #if DEBUG
+        debugScenarioRunner = DebugScenarioRunner(normalizer: normalizer, store: store)
+        debugPanelController = DebugPanelController(runner: debugScenarioRunner!,
+                                                    store: store)
+        #endif
 
         tank = FloatingTank(scene: director.scene)
         tank.onPetZipDropped = { [weak self] urls in
@@ -233,12 +243,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: #selector(toggleTank),
                                   keyEquivalent: "")
         toggle.target = self
+
+        #if DEBUG
+        menu.addItem(.separator())
+        let simulate = NSMenuItem(title: "Simulate", action: nil, keyEquivalent: "")
+        let simulateSubmenu = NSMenu(title: "Simulate")
+        simulateSubmenu.autoenablesItems = false
+        let openPanel = NSMenuItem(title: "Open Debug Panel…",
+                                   action: #selector(openDebugPanel),
+                                   keyEquivalent: "")
+        openPanel.target = self
+        simulateSubmenu.addItem(openPanel)
+        simulate.submenu = simulateSubmenu
+        menu.addItem(simulate)
+        #endif
+
         menu.addItem(.separator())
         let quit = menu.addItem(withTitle: "Quit Vivarium",
                                 action: #selector(quitApp),
                                 keyEquivalent: "q")
         quit.target = self
     }
+
+    #if DEBUG
+    @objc private func openDebugPanel() {
+        debugPanelController?.showPanel()
+    }
+    #endif
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
@@ -355,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let scene = DebugGridScene(library: library, pack: initial)
         debugGridScene = scene
 
-        let contentRect = NSRect(x: 200, y: 200,
+        let contentRect = NSRect(x: 600, y: 600,
                                  width: scene.size.width,
                                  height: scene.size.height)
         tank = FloatingTank(scene: scene,

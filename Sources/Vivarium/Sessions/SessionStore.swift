@@ -92,6 +92,21 @@ actor SessionStore {
         Array(sessions.values).sorted { $0.startedAt < $1.startedAt }
     }
 
+    #if DEBUG
+    /// Wipe every tracked session and emit `.removed` for each so any
+    /// SceneDirector subscribed via `events()` despawns the corresponding
+    /// pets. Used by the debug panel's "Stop & clear" action; not
+    /// available in release builds.
+    func resetForDebug() {
+        let drained = sessions
+        sessions.removeAll()
+        activeToolStartCounts.removeAll()
+        for s in drained.values {
+            emit(.removed(s))
+        }
+    }
+    #endif
+
     /// Subscribe to store events as an AsyncStream. Cancel the consuming task to unsubscribe.
     func events() -> AsyncStream<SessionStoreEvent> {
         AsyncStream { continuation in
