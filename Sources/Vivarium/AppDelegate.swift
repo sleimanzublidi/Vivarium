@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // private var alertNotifier: SystemSessionAlertNotifier!
     private var debugGridScene: DebugGridScene?
     private var debugGridPacks: [PetPack] = []
+    private var activeSessionsSnapshot = ActiveSessionsSnapshot()
     private let petRegistry = InstalledPetRegistry()
     private let normalizer = EventNormalizer(adapters: [
         ClaudeCodeAdapter(),
@@ -89,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { @MainActor in
             for await event in await store.events() {
                 // alertCoordinator.handle(event)
+                self.activeSessionsSnapshot.apply(event)
                 switch event {
                 case .added(let s), .changed(let s):
                     director.addOrUpdate(session: s)
@@ -193,6 +195,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hintItem.isEnabled = false
             menu.addItem(hintItem)
         }
+
+        menu.addItem(.separator())
+
+        let activeSessionsItem = NSMenuItem(title: "Active sessions",
+                                            action: nil,
+                                            keyEquivalent: "")
+        let activeSessionsSubmenu = NSMenu(title: "Active sessions")
+        activeSessionsSubmenu.autoenablesItems = false
+        for item in ActiveSessionsSnapshot.makeMenuItems(sessions: activeSessionsSnapshot.sessions,
+                                                         now: Date())
+        {
+            activeSessionsSubmenu.addItem(item)
+        }
+        activeSessionsItem.submenu = activeSessionsSubmenu
+        menu.addItem(activeSessionsItem)
 
         menu.addItem(.separator())
 
