@@ -66,9 +66,6 @@ fastlane/test_output
 !.orc/evaluators/
 !.orc/prompts/
 !.orc/self-improve/
-.orc/self-improve/*
-!.orc/self-improve/ideas-backlog.md
-!.orc/self-improve/known-issues.md
 !.orc/workflows/
 
 # Claude
