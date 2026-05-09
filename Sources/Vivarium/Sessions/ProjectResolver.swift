@@ -94,22 +94,37 @@ final class GlobalSettingsStore {
     struct Settings: Codable, Equatable {
         var version: Int
         var projectPets: [String: String]
+        var windowOpacity: Int
 
-        init(version: Int = 1, projectPets: [String: String] = [:]) {
+        init(version: Int = 1,
+             projectPets: [String: String] = [:],
+             windowOpacity: Int = GlobalSettingsStore.defaultWindowOpacity)
+        {
             self.version = version
             self.projectPets = projectPets
+            self.windowOpacity = GlobalSettingsStore.clampWindowOpacity(windowOpacity)
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
             projectPets = try container.decodeIfPresent([String: String].self, forKey: .projectPets) ?? [:]
+            let raw = try container.decodeIfPresent(Int.self, forKey: .windowOpacity)
+                ?? GlobalSettingsStore.defaultWindowOpacity
+            windowOpacity = GlobalSettingsStore.clampWindowOpacity(raw)
         }
     }
 
     static let defaultSettingsURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".vivarium/settings.json")
+    static let defaultWindowOpacity = 100
+    static let minimumWindowOpacity = 10
+    static let maximumWindowOpacity = 100
     private static let nonPersistablePetIDs: Set<String> = ["sample-pet"]
+
+    static func clampWindowOpacity(_ value: Int) -> Int {
+        min(max(value, minimumWindowOpacity), maximumWindowOpacity)
+    }
 
     private let settingsURL: URL
     private let fileManager: FileManager
@@ -167,6 +182,25 @@ final class GlobalSettingsStore {
         let key = Self.projectAgentKey(for: projectURL, agent: agent)
         guard settings.projectPets[key] != petID else { return }
         settings.projectPets[key] = petID
+        saveSettings(settings)
+    }
+
+    /// Persisted whole-window opacity as an integer percentage in
+    /// `[minimumWindowOpacity, maximumWindowOpacity]`. Reads tolerate
+    /// missing/legacy settings files by returning `defaultWindowOpacity`.
+    func windowOpacity() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadSettings().windowOpacity
+    }
+
+    func setWindowOpacity(_ value: Int) {
+        let clamped = Self.clampWindowOpacity(value)
+        lock.lock()
+        defer { lock.unlock() }
+        var settings = loadSettings()
+        guard settings.windowOpacity != clamped else { return }
+        settings.windowOpacity = clamped
         saveSettings(settings)
     }
 

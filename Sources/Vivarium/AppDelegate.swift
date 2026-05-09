@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // private var alertNotifier: SystemSessionAlertNotifier!
     private var debugGridScene: DebugGridScene?
     private var debugGridPacks: [PetPack] = []
+    private weak var opacityValueLabel: NSTextField?
     #if DEBUG
     private var debugPanelController: DebugPanelController?
     private var debugScenarioRunner: DebugScenarioRunner?
@@ -127,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         #endif
 
         tank = FloatingTank(scene: director.scene)
+        tank.alphaValue = Self.alphaValue(forOpacity: settingsStore.windowOpacity())
         tank.onPetZipDropped = { [weak self] urls in
             self?.installDroppedPetZips(urls)
         }
@@ -239,6 +241,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        if let settingsStore = settingsStore {
+            let opacityItem = NSMenuItem()
+            opacityItem.view = makeOpacitySliderView(initialPercent: settingsStore.windowOpacity())
+            menu.addItem(opacityItem)
+            menu.addItem(.separator())
+        }
+
         let toggle = menu.addItem(withTitle: "Show / Hide Tank",
                                   action: #selector(toggleTank),
                                   keyEquivalent: "")
@@ -290,6 +299,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case (true, false):  return "Run ./Scripts/setup.sh --claude to install hooks"
         case (false, true):  return "Run ./Scripts/setup.sh --copilot to install hooks"
         }
+    }
+
+    // MARK: - Opacity slider
+
+    /// Build a custom NSView containing the "Opacity" label, an NSSlider, and
+    /// a live percentage readout. The slider is continuous and snaps to
+    /// integer percentages via rounding inside the action handler.
+    private func makeOpacitySliderView(initialPercent: Int) -> NSView {
+        let width: CGFloat = 260
+        let height: CGFloat = 22
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let title = NSTextField(labelWithString: "Opacity")
+        title.font = NSFont.menuFont(ofSize: 0)
+        title.textColor = .labelColor
+        title.frame = NSRect(x: 14, y: 3, width: 60, height: 16)
+        container.addSubview(title)
+
+        let slider = NSSlider(value: Double(initialPercent),
+                              minValue: Double(GlobalSettingsStore.minimumWindowOpacity),
+                              maxValue: Double(GlobalSettingsStore.maximumWindowOpacity),
+                              target: self,
+                              action: #selector(opacitySliderChanged(_:)))
+        slider.isContinuous = true
+        slider.frame = NSRect(x: 78, y: 0, width: 130, height: height)
+        container.addSubview(slider)
+
+        let value = NSTextField(labelWithString: "\(initialPercent)%")
+        value.font = NSFont.menuFont(ofSize: 0)
+        value.textColor = .secondaryLabelColor
+        value.alignment = .right
+        value.frame = NSRect(x: 212, y: 3, width: 38, height: 16)
+        container.addSubview(value)
+        opacityValueLabel = value
+
+        return container
+    }
+
+    @objc private func opacitySliderChanged(_ sender: NSSlider) {
+        let percent = GlobalSettingsStore.clampWindowOpacity(Int(sender.doubleValue.rounded()))
+        sender.doubleValue = Double(percent)
+        opacityValueLabel?.stringValue = "\(percent)%"
+        tank?.alphaValue = Self.alphaValue(forOpacity: percent)
+        settingsStore?.setWindowOpacity(percent)
+    }
+
+    private static func alphaValue(forOpacity percent: Int) -> CGFloat {
+        CGFloat(GlobalSettingsStore.clampWindowOpacity(percent)) / 100.0
     }
 
     @objc private func toggleTank() {
