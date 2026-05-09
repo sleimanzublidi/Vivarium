@@ -68,19 +68,26 @@ command -v jq >/dev/null || { echo "ERROR: jq is required" >&2; exit 1; }
 
 # --- Build & install notify -------------------------------------------------
 
-echo "==> Locating VivariumNotify binary"
-BUILT_DIR="$(xcodebuild -project Vivarium.xcodeproj -scheme VivariumNotify \
-  -showBuildSettings 2>/dev/null | awk '/ BUILT_PRODUCTS_DIR / {print $3}')"
-NOTIFY_SRC="$BUILT_DIR/VivariumNotify"
+# Build into a script-controlled directory rather than parsing
+# `-showBuildSettings` to find Xcode's DerivedData. Two wins:
+#   1. The binary path is deterministic — no awk over xcodebuild's settings
+#      output, which previously broke when DerivedData paths contained
+#      spaces or when `-showBuildSettings` printed multiple matches from
+#      dependent targets.
+#   2. `-showBuildSettings` re-evaluates the entire build graph and is the
+#      slowest part of the script; skipping it shaves ~10–30 s.
+echo "==> Building VivariumNotify"
+NOTIFY_BUILD_DIR="$REPO_ROOT/.build/setup-derived-data"
+mkdir -p "$NOTIFY_BUILD_DIR"
+xcodebuild -project Vivarium.xcodeproj -scheme VivariumNotify \
+  -configuration Debug \
+  -derivedDataPath "$NOTIFY_BUILD_DIR" \
+  -destination 'platform=macOS' \
+  build >/dev/null
+NOTIFY_SRC="$NOTIFY_BUILD_DIR/Build/Products/Debug/VivariumNotify"
 
 if [[ ! -x "$NOTIFY_SRC" ]]; then
-  echo "    Not found; running xcodebuild..."
-  xcodebuild -project Vivarium.xcodeproj -scheme VivariumNotify \
-    -destination 'platform=macOS' build >/dev/null
-fi
-
-if [[ ! -x "$NOTIFY_SRC" ]]; then
-  echo "ERROR: VivariumNotify binary still missing at $NOTIFY_SRC" >&2
+  echo "ERROR: build succeeded but binary missing at $NOTIFY_SRC" >&2
   exit 1
 fi
 
