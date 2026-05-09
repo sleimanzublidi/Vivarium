@@ -22,7 +22,7 @@ final class BalloonNode: SKNode {
     static let edgeMargin: CGFloat = 4
     static let headerBodyGap: CGFloat = 2
     static let cloudBumpRadius: CGFloat = 10
-    static let cloudOutlineWidth: CGFloat = 2
+    static let cloudOutlineWidth: CGFloat = 1
     static let cloudOutlineColor = NSColor(white: 0.12, alpha: 1)
 
     /// Visual style for the balloon. `.speech` is a rounded rect with a

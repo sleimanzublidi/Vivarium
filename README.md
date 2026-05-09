@@ -156,7 +156,7 @@ Set `VIVARIUM_DEBUG_GRID=1` before launching to replace the tank with a 3×3 gri
 * [x] Persistent `SessionStore` snapshots across restarts
 * [ ] Rotating logs (`notify.log`, `events.log`, `pets.log`)
 * [ ] Surface pack validation issues in the menu ("Pets → Issues (N)")
-* [ ] Show a ballon that looks like a terminal when running bash/shell tools.
+* [ ] Show a balloon that looks like a terminal when running bash/shell tools.
 * [ ] Detect rubber duck tools and show a thinking balloon with a duck on it.
 * [ ] Click-through-on-hover for the tank
 

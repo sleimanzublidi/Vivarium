@@ -37,14 +37,19 @@ final class SceneDirector {
     /// Alpha for every non-newest balloon. Older balloons stay at their
     /// natural Y (we don't push them up — that risks clipping them off the
     /// top of the tank) and recede via dimming + lower z instead.
-    static let balloonDimmedAlpha: CGFloat = 0.3
+    static let balloonDimmedAlpha: CGFloat = 0.5
     /// zPosition for the most-recent balloon. Older balloons step down so
     /// they paint behind it where they overlap.
     private static let balloonNewestZ: CGFloat = 110
     /// Per-side overhang: balloon max-width = pet width + 2 × this. Keeps
     /// each balloon roughly above its own pet when several agents are
-    /// talking at once, instead of stretching across neighbours.
+    /// talking at once, instead of stretching across neighbors.
     static let balloonHorizontalOverhang: CGFloat = 16
+
+    /// Distance in scene points between the bottom of the scene and the
+    /// bottom of a pet sprite. Pets use a centered anchor, so this is added
+    /// to half the pet height to derive `groundY`.
+    static let petBottomPadding: CGFloat = 2
 
     private var overflowLabel: SKLabelNode?
 
@@ -71,8 +76,14 @@ final class SceneDirector {
         let scene = SKScene(size: sceneSize)
         scene.scaleMode = .aspectFit
         scene.backgroundColor = .black
+        let background = BackgroundNode(size: sceneSize)
+        // Sit behind every pet, balloon, and overflow indicator. Pet/balloon
+        // z values start at 0/110 respectively; -100 keeps the backdrop clear
+        // of those layers without us having to thread a constant.
+        background.zPosition = -100
+        scene.addChild(background)
         self.scene = scene
-        self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + 6
+        self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + Self.petBottomPadding
     }
 
     /// Add a new session, or update an existing one. Reconciles the visible
