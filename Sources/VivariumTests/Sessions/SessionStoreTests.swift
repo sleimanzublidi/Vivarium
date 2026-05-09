@@ -11,7 +11,10 @@ final class SessionStoreTests: XCTestCase {
         resolver = ProjectResolver(overrides: [], defaultPetID: "sample-pet")
         clock = TestClock(now: Date(timeIntervalSince1970: 0))
         let clockRef = clock!
-        store = SessionStore(resolver: resolver, idleTimeout: 600, now: { clockRef.now })
+        store = SessionStore(resolver: resolver,
+                             idleTimeout: 600,
+                             evictionSweepInterval: 0,
+                             now: { clockRef.now })
     }
 
     func test_sessionStart_createsSessionInIdle() async {
@@ -69,6 +72,7 @@ final class SessionStoreTests: XCTestCase {
                             idleTimeout: 600,
                             agentIdleTimeout: timeout,
                             completionAnimationDuration: completionAnimationDuration,
+                            evictionSweepInterval: 0,
                             now: { clockRef.now })
     }
 
@@ -159,6 +163,7 @@ final class SessionStoreTests: XCTestCase {
         let store = SessionStore(resolver: resolver,
                                  idleTimeout: 600,
                                  completionAnimationDuration: 0.1,
+                                 evictionSweepInterval: 0,
                                  now: { clockRef.now })
 
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
@@ -188,6 +193,7 @@ final class SessionStoreTests: XCTestCase {
         let store = SessionStore(resolver: resolver,
                                  idleTimeout: 600,
                                  completionAnimationDuration: 0.2,
+                                 evictionSweepInterval: 0,
                                  now: { clockRef.now })
 
         await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
@@ -339,6 +345,43 @@ final class SessionStoreTests: XCTestCase {
         await store.evictStale()
         let snap = await store.snapshot()
         XCTAssertEqual(snap.count, 0)
+    }
+
+    /// SPEC §6 promises a periodic sweep that drops stale sessions
+    /// without an explicit caller — the per-session `idleTimer` only
+    /// transitions state, it never removes the entry. This test wires a
+    /// short sweep interval and asserts a `.removed` event arrives
+    /// without any explicit `evictStale()` call.
+    func test_periodicSweep_evictsStaleSessionsWithoutExplicitCall() async {
+        let clockRef = clock!
+        let store = SessionStore(resolver: resolver,
+                                 idleTimeout: 0.05,
+                                 agentIdleTimeout: 600,
+                                 completionAnimationDuration: 0.05,
+                                 evictionSweepInterval: 0.05,
+                                 now: { clockRef.now })
+
+        let removalExpectation = expectation(description: "sweep emits .removed for stale session")
+        let stream = await store.events()
+        let observer = Task {
+            for await event in stream {
+                if case .removed = event {
+                    removalExpectation.fulfill()
+                    return
+                }
+            }
+        }
+
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .sessionStart, detail: nil, at: clock.now))
+        clock.now = Date(timeIntervalSince1970: 60)   // > idleTimeout
+
+        await fulfillment(of: [removalExpectation], timeout: 2.0)
+        observer.cancel()
+
+        let snap = await store.snapshot()
+        XCTAssertTrue(snap.isEmpty, "sweep should have removed the stale session")
     }
 
     func test_subagentDepth_tracking() async {

@@ -7,7 +7,7 @@ final class EndToEndTests: XCTestCase {
         let socket = FileManager.default.temporaryDirectory
             .appendingPathComponent("e2e-\(UUID().uuidString).sock")
         let resolver = ProjectResolver(overrides: [], defaultPetID: "sample-pet")
-        let store = SessionStore(resolver: resolver, idleTimeout: 600)
+        let store = SessionStore(resolver: resolver, idleTimeout: 600, evictionSweepInterval: 0)
         let normalizer = EventNormalizer(adapters: [ClaudeCodeAdapter(), CopilotCLIAdapter()])
         let server = try SocketServer(socketURL: socket) { line in
             guard let event = normalizer.normalize(line: line) else { return }

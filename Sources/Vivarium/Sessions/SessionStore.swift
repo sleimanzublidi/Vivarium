@@ -13,6 +13,7 @@ actor SessionStore {
     private var idleTimers: [String: Task<Void, Never>] = [:]
     private var temporaryStateTimers: [String: Task<Void, Never>] = [:]
     private var temporaryFallbackStates: [String: PetState] = [:]
+    private var sweepTask: Task<Void, Never>?
 
     /// - parameters:
     ///   - idleTimeout: how long a session can sit with no events before
@@ -24,10 +25,15 @@ actor SessionStore {
     ///     hook can be missed when a session predates the install.
     ///   - completionAnimationDuration: how long the success animation plays
     ///     before returning to the fallback state.
+    ///   - evictionSweepInterval: how often the background sweep calls
+    ///     `evictStale()` to drop sessions older than `idleTimeout` (default:
+    ///     30 s, per SPEC §6). A value `<= 0` disables the sweep entirely so
+    ///     unit tests with an injected `now` clock stay deterministic.
     init(resolver: ProjectResolver,
          idleTimeout: TimeInterval = 600,
          agentIdleTimeout: TimeInterval = 30,
          completionAnimationDuration: TimeInterval = 1.8,
+         evictionSweepInterval: TimeInterval = 30,
          now: @escaping @Sendable () -> Date = { Date() })
     {
         self.resolver = resolver
@@ -35,6 +41,34 @@ actor SessionStore {
         self.agentIdleTimeout = agentIdleTimeout
         self.completionAnimationDuration = completionAnimationDuration
         self.now = now
+
+        if evictionSweepInterval > 0 {
+            let interval = evictionSweepInterval
+            // The sweep task is stored via an actor-isolated method so the
+            // assignment doesn't fight Swift 6's nonisolated-init rules. The
+            // first sleep is `interval` long anyway, so the brief hop here
+            // doesn't change observable behavior.
+            Task { [weak self] in
+                await self?.installEvictionSweep(interval: interval)
+            }
+        }
+    }
+
+    deinit {
+        sweepTask?.cancel()
+    }
+
+    private func installEvictionSweep(interval: TimeInterval) {
+        guard sweepTask == nil else { return }
+        sweepTask = Task { [weak self] in
+            let nanos = UInt64(interval * 1_000_000_000)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: nanos)
+                if Task.isCancelled { return }
+                guard let self else { return }
+                await self.evictStale()
+            }
+        }
     }
 
     /// Snapshot for tests / scene refresh.
