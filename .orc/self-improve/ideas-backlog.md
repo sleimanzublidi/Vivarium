@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-manual
+Last updated: 20260509-104259
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
