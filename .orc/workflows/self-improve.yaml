@@ -43,7 +43,7 @@ nodes:
       - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
       - **Safety:** likelihood the change can be made without regressions.
 
-      The composite score is `Value x Feasibility x Safety`, with a maximum of 125.
+      The composite score is `2 × Value + Feasibility + Safety`, with a maximum of 20. Value is double-weighted because user-facing impact is the primary driver; feasibility and safety act as gates.
 
       Backlog retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes. Remove low-value, unsafe, speculative, obsolete, duplicate, or already-implemented ideas.
       EOF
@@ -141,9 +141,11 @@ nodes:
       review_dir: "{{worktree_path}}/.orc/self-improve"
       agent: "{{agent}}"
 
-  # Agent-written commit body grounded in the actual diff. Runs only on the
-  # IMPLEMENT path; for NOOP the commit node uses a fixed body. Failures here
-  # are non-fatal -- the commit node falls back to a generic message.
+  # Renders the Selected Task block from the task file into a commit message
+  # — what was implemented, the scores, and the rationale. Does NOT describe
+  # the diff (use `git show` for that). Runs only on the IMPLEMENT path; for
+  # NOOP the commit node uses a fixed body. Failures here are non-fatal --
+  # the commit node falls back to a generic body.
   - id: commit-message
     agent: "{{agent}}"
     depends_on:
@@ -154,32 +156,32 @@ nodes:
     parameters:
       permission_mode: bypassPermissions
     prompt: |
-      Write a detailed git commit message for the changes in the worktree at `{{worktree_path}}`.
+      Write a git commit message for the implementation completed in the worktree at `{{worktree_path}}`.
 
-      Read the task file for the original goal and rationale:
+      Source of truth is the **Selected Task** section of the task file (do NOT inspect the diff or describe per-file changes):
       - {{tasks_file}}
 
-      Inspect the actual changes (this is the source of truth — ground every claim here, do not invent or infer beyond the diff):
-      - `cd {{worktree_path}} && git status`
-      - `cd {{worktree_path}} && git diff HEAD`
+      From that section, extract: title, source, priority, scores (Value, Feasibility, Safety, Composite), description, and rationale. Use the wording from the task file verbatim where possible — light cleanup is fine, but do not invent details.
 
       Write the message to `{{worktree_path}}/.orc/self-improve/{{timestamp}}-commit.txt` with exactly this structure:
 
       ```
-      <one-line subject, under 72 chars, describing what was implemented in plain language. Do NOT include any "[Self-improve: ...]" prefix — the workflow prepends that.>
+      <one-line subject under 72 chars: the task title, phrased as what was implemented. Do NOT include any "[Self-improve: ...]" prefix — the workflow prepends that.>
 
-      <blank line>
+      **Source:** <copy from task file, e.g. "Backlog #1" / "Product Ideas #2" / "Engineering Ideas #3">
+      **Priority:** <P0/P1/P2 from task file>
+      **Score:** Value <V> · Feasibility <F> · Safety <S> · Composite <C>
 
-      <body: 3-8 short bullet points or short paragraphs describing:
-        - the concrete code changes (files / behavior / new types or APIs),
-        - the user- or developer-visible effect,
-        - the motivation pulled from the task description,
-        - that build, validation, and code review passed.>
+      **Description**
+      <Description from the task file, verbatim or lightly tightened. Multi-line is fine.>
+
+      **Rationale**
+      <Rationale from the task file, verbatim or lightly tightened. Multi-line is fine.>
+
+      **Validation:** Build, smoke validation, and multi-agent code review passed.
       ```
 
-      Keep the body factual and specific (mention key files, types, or commands when useful). Do not restate the task verbatim — describe what *actually* shipped in the diff.
-
-      Output ONLY the absolute path of the saved file.
+      Do not include per-file change lists, diffstats, or descriptions of what changed where — `git show` already shows that. Output ONLY the absolute path of the saved file.
     output: commit_message_file
 
   - id: commit

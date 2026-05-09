@@ -1,0 +1,281 @@
+# Implement-idea — implement a single idea from the backlog by ID.
+#
+# Reads `.orc/self-improve/ideas-backlog.md`, extracts the entry whose
+# heading matches `## IDEA-NNN`, converts it into a task file in the same
+# format the adversarial-reviewer produces, then runs the existing
+# implement → validate → review → commit pipeline. The implemented idea
+# is removed from the backlog as part of the same commit so future runs
+# do not re-propose it.
+#
+# By default the branch is preserved for human review (no auto-merge).
+# Pass `--input auto_merge=true` to fast-forward main onto the branch tip
+# and delete the branch automatically on success. FF-only is the safety
+# net: if main moved during the run the merge fails loudly and the
+# branch is kept for manual review.
+#
+# Usage:
+#   orc start implement-idea --input idea_id="IDEA-001"
+#   orc start implement-idea --input idea_id="IDEA-002" --input agent="copilot"
+#   orc start implement-idea --input idea_id="IDEA-003" --input review_iterations="5"
+#   orc start implement-idea --input idea_id="IDEA-004" --input auto_merge="true"
+name: implement-idea
+description: Implement a specific backlog idea by ID. Builds, validates, and runs a multi-agent code review before committing on a dedicated branch.
+
+input:
+  - name: agent
+    type: string
+    default: "claude-code"
+  - name: idea_id
+    type: string
+    required: true
+  - name: review_iterations
+    type: string
+    default: "3"
+  - name: build_command
+    type: string
+    default: "bash Scripts/build.sh --debug"
+  - name: validate_command
+    type: string
+    default: "bash Scripts/validate.sh"
+  - name: auto_merge
+    type: string
+    default: "false"
+
+nodes:
+  - id: setup
+    command: |
+      set -eu
+      TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
+      printf '%s\n' "$TIMESTAMP"
+    output: timestamp
+
+  - id: validate-idea-id
+    agent: shell
+    depends_on: setup
+    command: |
+      set -eu
+      ID="{{idea_id}}"
+      case "$ID" in
+        IDEA-[0-9][0-9][0-9]) ;;
+        *) echo "ERROR: idea_id must be of the form IDEA-NNN (got '$ID')" >&2; exit 1 ;;
+      esac
+      if ! grep -Eq "^## ${ID}\$" "{{repo_root}}/.orc/self-improve/ideas-backlog.md"; then
+        echo "ERROR: ${ID} not found in {{repo_root}}/.orc/self-improve/ideas-backlog.md" >&2
+        exit 1
+      fi
+      printf '%s\n' "$ID"
+    output: validated_idea_id
+
+  - id: create-worktree
+    agent: shell
+    depends_on: validate-idea-id
+    command: |
+      set -eu
+      BRANCH="idea/{{idea_id}}-{{timestamp}}"
+      REPO_NAME="$(basename "{{repo_root}}")"
+      WORKTREE="$(dirname "{{repo_root}}")/${REPO_NAME}-{{idea_id}}-{{timestamp}}"
+      git worktree add -b "$BRANCH" "$WORKTREE" HEAD >&2
+      printf '%s\n' "$WORKTREE"
+    output: worktree_path
+
+  # Convert the IDEA-NNN backlog entry into a task file in the same format
+  # the adversarial-reviewer produces, AND remove the entry from the backlog
+  # (plus its row in the "Top by composite" table) so the implementation
+  # commit naturally reflects "this idea has shipped". Implementation/
+  # validation notes are derived from the entry's Notes field.
+  - id: extract-task
+    agent: "{{agent}}"
+    depends_on: create-worktree
+    parameters:
+      permission_mode: bypassPermissions
+    prompt: |
+      Work exclusively in the git worktree at `{{worktree_path}}`. Start by changing into that directory.
+
+      You are converting backlog entry **{{idea_id}}** into an implementation task and removing it from the backlog so the next run won't propose it again.
+
+      1. Read `{{worktree_path}}/.orc/self-improve/ideas-backlog.md`.
+      2. Locate the section whose heading is exactly `## {{idea_id}}`. Capture every field: Title, Source, Value, Feasibility, Safety, Composite, Status, Description, Rationale, Notes.
+      3. Write a task file at `{{worktree_path}}/.orc/self-improve/{{timestamp}}-tasks.md` using exactly this structure:
+
+         ```
+         # {{timestamp}} — Task Selection ({{idea_id}})
+
+         ## Selected Task
+         **Decision:** IMPLEMENT
+         ### <Title from backlog>
+         **Source:** {{idea_id}}
+         **Priority:** P0 if Composite >= 16, else P1 if Composite >= 13, else P2
+         **Value:** <from backlog>
+         **Feasibility:** <from backlog>
+         **Safety:** <from backlog>
+         **Composite:** <from backlog>
+         **Description:** <verbatim from backlog>
+         **Rationale:** <verbatim from backlog>
+         **Implementation notes:** <distilled from the backlog Notes field — feasibility caveats, ordering constraints, files/types named in the description, any warnings about safety or scope>
+         **Validation notes:** Build with `{{build_command}}`, run `{{validate_command}}`, and add tests for any new behavior so a future agent can re-derive the contract.
+         ```
+
+      4. Edit `{{worktree_path}}/.orc/self-improve/ideas-backlog.md` in place to:
+         - Delete the entire `## {{idea_id}}` section (heading and all body lines, up to but not including the next `## ` heading).
+         - Remove the matching row from the "Top by composite" table.
+         - Update the `Last updated:` line to `{{timestamp}}`.
+         - Do NOT renumber other entries, change other entries' fields, or reflow the file.
+
+      Output ONLY the absolute path of the saved task file.
+    output: tasks_file_raw
+
+  # Deterministic path so downstream nodes don't depend on agent stdout shape.
+  - id: tasks-file
+    agent: shell
+    depends_on: extract-task
+    command: 'printf "%s/.orc/self-improve/%s-tasks.md" "{{worktree_path}}" "{{timestamp}}"'
+    output: tasks_file
+
+  - id: software-engineer
+    workflow: .orc/workflows/implement-task.yaml
+    depends_on: tasks-file
+    on_failure: continue
+    inputs:
+      task_file: "{{tasks_file}}"
+      worktree_path: "{{worktree_path}}"
+      agent: "{{agent}}"
+
+  - id: tool-validation
+    workflow: .orc/workflows/tool-validation.yaml
+    depends_on: software-engineer
+    when: "{{software-engineer.status}} == 'completed'"
+    inputs:
+      worktree_path: "{{worktree_path}}"
+      agent: "{{agent}}"
+      validation_report: "{{worktree_path}}/.orc/self-improve/{{timestamp}}-validation.md"
+      build_command: "{{build_command}}"
+      validate_command: "{{validate_command}}"
+
+  - id: fix-loop
+    workflow: .orc/workflows/fix-loop.yaml
+    depends_on: tool-validation
+    when: "{{tool-validation.status}} == 'completed'"
+    inputs:
+      max_iterations: "{{review_iterations}}"
+      worktree_path: "{{worktree_path}}"
+      review_dir: "{{worktree_path}}/.orc/self-improve"
+      agent: "{{agent}}"
+
+  # Renders the Selected Task block into a commit message — title, scores,
+  # description, rationale. Does NOT describe the diff. Failures are non-
+  # fatal; the commit node falls back to a generic body.
+  - id: commit-message
+    agent: "{{agent}}"
+    depends_on: fix-loop
+    when: "{{fix-loop.status}} == 'completed'"
+    on_failure: continue
+    parameters:
+      permission_mode: bypassPermissions
+    prompt: |
+      Write a git commit message for the implementation completed in the worktree at `{{worktree_path}}`.
+
+      Source of truth is the **Selected Task** section of the task file (do NOT inspect the diff or describe per-file changes):
+      - {{tasks_file}}
+
+      From that section, extract: title, source ({{idea_id}}), priority, scores (Value, Feasibility, Safety, Composite), description, and rationale. Use the wording from the task file verbatim where possible — light cleanup is fine, but do not invent details.
+
+      Write the message to `{{worktree_path}}/.orc/self-improve/{{timestamp}}-commit.txt` with exactly this structure:
+
+      ```
+      <one-line subject under 72 chars: the task title, phrased as what was implemented. Do NOT include any "[{{idea_id}}]" prefix — the workflow prepends that.>
+
+      **Source:** {{idea_id}}
+      **Priority:** <P0/P1/P2 from task file>
+      **Score:** Value <V> · Feasibility <F> · Safety <S> · Composite <C>
+
+      **Description**
+      <Description from the task file, verbatim or lightly tightened.>
+
+      **Rationale**
+      <Rationale from the task file, verbatim or lightly tightened.>
+
+      **Validation:** Build, smoke validation, and multi-agent code review passed.
+      ```
+
+      Output ONLY the absolute path of the saved file.
+    output: commit_message_file
+
+  - id: commit
+    agent: shell
+    depends_on: commit-message
+    when: "{{fix-loop.status}} == 'completed'"
+    command: |
+      set -eu
+      TIMESTAMP="{{timestamp}}"
+      ID="{{idea_id}}"
+      MESSAGE_FILE="{{worktree_path}}/.orc/self-improve/${TIMESTAMP}-commit.txt"
+      git -C "{{worktree_path}}" add -A
+      if git -C "{{worktree_path}}" diff --cached --quiet; then
+        echo "No changes to commit."
+      elif [ -s "$MESSAGE_FILE" ]; then
+        # Prepend [<ID>] to the agent-written subject so log filters can find it.
+        SUBJECT_LINE="$(head -n 1 "$MESSAGE_FILE")"
+        FULL_MESSAGE_FILE="$(mktemp)"
+        {
+          printf '[%s] %s\n' "$ID" "$SUBJECT_LINE"
+          tail -n +2 "$MESSAGE_FILE"
+        } > "$FULL_MESSAGE_FILE"
+        git -C "{{worktree_path}}" commit -F "$FULL_MESSAGE_FILE"
+        rm -f "$FULL_MESSAGE_FILE"
+      else
+        git -C "{{worktree_path}}" commit \
+          -m "[${ID}] Implementation" \
+          -m "Implementation validated and reviewed."
+      fi
+    output: commit_result
+
+  # Remove the worktree once committed. The branch is preserved (the merge
+  # node decides whether to delete it). We gate on commit success so a
+  # failed run leaves the worktree in place for inspection.
+  - id: cleanup-worktree
+    agent: shell
+    depends_on: commit
+    when: "{{commit.status}} == 'completed'"
+    command: |
+      set -eu
+      BRANCH="idea/{{idea_id}}-{{timestamp}}"
+      git -C "{{repo_root}}" worktree remove --force "{{worktree_path}}"
+      echo "Worktree removed. Branch '$BRANCH' retained:"
+      git -C "{{repo_root}}" rev-parse --short "$BRANCH"
+    output: cleanup_result
+
+  # Optional fast-forward merge to main. Runs only when auto_merge=true.
+  # FF-only is the safety net: if main moved during the run, the merge
+  # fails loudly and the branch is kept for manual review (on_failure:
+  # continue keeps the workflow itself green).
+  - id: merge-to-main
+    agent: shell
+    depends_on: cleanup-worktree
+    when: "{{auto_merge}} == 'true' && {{cleanup-worktree.status}} == 'completed'"
+    on_failure: continue
+    command: |
+      set -eu
+      BRANCH="idea/{{idea_id}}-{{timestamp}}"
+      MAIN_HEAD="$(git -C "{{repo_root}}" rev-parse main)"
+      BRANCH_HEAD="$(git -C "{{repo_root}}" rev-parse "$BRANCH")"
+      if [ "$MAIN_HEAD" = "$BRANCH_HEAD" ]; then
+        echo "Main already at branch tip — nothing to merge."
+        exit 0
+      fi
+      git -C "{{repo_root}}" merge --ff-only "$BRANCH"
+      # Branch is redundant after FF — main already points at the same commit.
+      git -C "{{repo_root}}" branch -d "$BRANCH"
+      echo "Fast-forwarded main and deleted branch '$BRANCH'."
+    output: merge_result
+
+output:
+  idea_id: "{{idea_id}}"
+  branch: "idea/{{idea_id}}-{{timestamp}}"
+  tasks: "{{tasks_file}}"
+  implementation: "{{software-engineer.output | default: SKIPPED}}"
+  validation: "{{tool-validation.output | default: SKIPPED}}"
+  review: "{{fix-loop.output | default: SKIPPED}}"
+  commit_message: "{{commit_message_file | default: SKIPPED}}"
+  commit: "{{commit_result | default: SKIPPED}}"
+  cleanup: "{{cleanup_result | default: SKIPPED}}"
+  merge: "{{merge_result | default: SKIPPED}}"

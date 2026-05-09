@@ -1,0 +1,154 @@
+# Generate-ideas — runs only the idea-generation half of self-improve.
+# Produces product/engineering ideas, ranks them via the adversarial
+# reviewer, commits the resulting files on a temporary branch, and
+# fast-forwards main to that commit. Stops before any implementation.
+#
+# Usage:
+#   orc start generate-ideas
+#   orc start generate-ideas --input agent="copilot"
+name: generate-ideas
+description: Generate and rank product and engineering ideas without implementing them. Commits the ideas-backlog plus per-run idea files and fast-forwards main on success.
+
+input:
+  - name: agent
+    type: string
+    default: "claude-code"
+
+nodes:
+  - id: setup
+    command: |
+      set -eu
+      TIMESTAMP="$(date '+%Y%m%d-%H%M%S')"
+      mkdir -p {{orc_root}}/self-improve
+      if [ ! -f "{{orc_root}}/self-improve/ideas-backlog.md" ]; then
+        cat > "{{orc_root}}/self-improve/ideas-backlog.md" <<'EOF'
+      # Ideas Backlog
+
+      Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
+
+      ## Scoring Guide
+
+      Each idea is scored from 1 to 5 on:
+      - **Value:** user-facing product impact or ability to unblock high-value user-facing work.
+      - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
+      - **Safety:** likelihood the change can be made without regressions.
+
+      Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the primary driver; feasibility and safety act as gates.
+
+      Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes.
+      EOF
+      fi
+      printf '%s\n' "$TIMESTAMP"
+    output: timestamp
+
+  - id: create-worktree
+    command: |
+      set -eu
+      BRANCH="ideas/{{timestamp}}"
+      REPO_NAME="$(basename "{{repo_root}}")"
+      WORKTREE="$(dirname "{{repo_root}}")/${REPO_NAME}-ideas-{{timestamp}}"
+      git worktree add -b "$BRANCH" "$WORKTREE" HEAD >&2
+      mkdir -p "$WORKTREE/.orc/self-improve"
+      cp -R "{{orc_root}}/self-improve/." "$WORKTREE/.orc/self-improve/"
+      printf '%s\n' "$WORKTREE"
+    depends_on: setup
+    output: worktree_path
+
+  - id: codebase-summary
+    agent: "{{agent}}"
+    depends_on: create-worktree
+    prompt_file: "{{orc_root}}/prompts/codebase-summary.md"
+    parameters:
+      permission_mode: bypassPermissions
+    output: codebase_summary
+
+  - id: product-manager
+    agent: "{{agent}}"
+    depends_on: codebase-summary
+    prompt_file: "{{orc_root}}/prompts/product-manager.md"
+    parameters:
+      permission_mode: bypassPermissions
+    output: product_ideas_file
+
+  - id: principal-engineer
+    agent: "{{agent}}"
+    depends_on: codebase-summary
+    prompt_file: "{{orc_root}}/prompts/principal-engineer.md"
+    parameters:
+      permission_mode: bypassPermissions
+    output: engineer_ideas_file
+
+  - id: adversarial-reviewer
+    agent: "{{agent}}"
+    depends_on:
+      - product-manager
+      - principal-engineer
+    prompt_file: "{{orc_root}}/prompts/adversarial-reviewer.md"
+    parameters:
+      permission_mode: bypassPermissions
+    output: reviewer_output
+
+  - id: commit
+    agent: shell
+    depends_on: adversarial-reviewer
+    command: |
+      set -eu
+      TIMESTAMP="{{timestamp}}"
+      cd "{{worktree_path}}"
+      # Stage the durable backlog plus this run's three idea files.
+      git add \
+        .orc/self-improve/ideas-backlog.md \
+        ".orc/self-improve/${TIMESTAMP}-product-ideas.md" \
+        ".orc/self-improve/${TIMESTAMP}-engineer-ideas.md" \
+        ".orc/self-improve/${TIMESTAMP}-tasks.md"
+      if git diff --cached --quiet; then
+        echo "No changes to commit."
+      else
+        git commit \
+          -m "[Ideas: ${TIMESTAMP}]" \
+          -m "Generated product and engineering ideas; updated backlog and selected next task."
+      fi
+    output: commit_result
+
+  - id: merge-to-main
+    agent: shell
+    depends_on: commit
+    command: |
+      set -eu
+      BRANCH="ideas/{{timestamp}}"
+      MAIN_HEAD="$(git -C "{{repo_root}}" rev-parse main)"
+      BRANCH_HEAD="$(git -C "{{repo_root}}" rev-parse "$BRANCH")"
+      if [ "$MAIN_HEAD" = "$BRANCH_HEAD" ]; then
+        echo "Main already at branch tip — nothing to merge."
+        exit 0
+      fi
+      # Fast-forward only: if main moved during the run, abort loudly so the
+      # branch is preserved for manual review/merge instead of an octopus.
+      git -C "{{repo_root}}" merge --ff-only "$BRANCH"
+      echo "Fast-forwarded main to $BRANCH."
+    output: merge_result
+
+  - id: cleanup-worktree
+    agent: shell
+    depends_on: merge-to-main
+    when: "{{merge-to-main.status}} == 'completed'"
+    command: |
+      set -eu
+      BRANCH="ideas/{{timestamp}}"
+      # Remove the worktree first — git refuses to delete a branch that is
+      # still checked out anywhere. --force tolerates leftover gitignored
+      # files that would otherwise block removal.
+      git -C "{{repo_root}}" worktree remove --force "{{worktree_path}}"
+      # Branch is redundant after FF — main already points at the same commit.
+      git -C "{{repo_root}}" branch -d "$BRANCH"
+      echo "Worktree removed and branch deleted."
+    output: cleanup_result
+
+output:
+  product_ideas: "{{product_ideas_file}}"
+  engineer_ideas: "{{engineer_ideas_file}}"
+  tasks: "{{worktree_path}}/.orc/self-improve/{{timestamp}}-tasks.md"
+  branch: "ideas/{{timestamp}}"
+  commit: "{{commit_result | default: SKIPPED}}"
+  merge: "{{merge_result | default: SKIPPED}}"
+  cleanup: "{{cleanup_result | default: SKIPPED}}"

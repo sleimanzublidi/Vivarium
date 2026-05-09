@@ -28,44 +28,70 @@ Multiply the three scores to get a composite rank. Select the idea with the high
 
 Minimum bar: select an implementation task only if at least one idea scores Value >= 3, Feasibility >= 3, and Safety >= 3. If no idea clears that bar, choose no task for this run. Still update the backlog with the best remaining candidates.
 
-After selecting the task, rewrite `{{worktree_path}}/.orc/self-improve/ideas-backlog.md` so future runs retain the best remaining ideas:
-- Keep the selected idea out of the backlog because it is now assigned to this run.
-- Remove ideas that are already implemented, obsolete, invalid, or exact duplicates.
-- Preserve and rank the strongest remaining ideas from both the old backlog and the new idea files, with best ideas at the top.
-- Keep only ideas with Value >= 3, Safety >= 3, and either Feasibility >= 3 or explicit strategic/unblocking justification in the notes.
-- Remove low-value, unsafe, speculative, stale, or weakly justified ideas instead of carrying them forward.
-- If a new idea supersedes an older version, keep only the clearer/superior version.
-- Use this format:
-  ```
-  # Ideas Backlog
+After selecting the task, update `{{worktree_path}}/.orc/self-improve/ideas-backlog.md` in place. **The goal is reviewable diffs**: do NOT rewrite the file from scratch and do NOT reorder or renumber existing entries. The only changes a normal run should produce are:
+- Updating the `Last updated:` line.
+- Regenerating the "Top by composite" table near the top.
+- Removing the section(s) for any selected/implemented/obsolete/duplicate ideas.
+- Updating fields in-place on existing entries when their scores or notes change.
+- Appending new sections at the bottom for newly surfaced ideas.
 
-  Last updated: {{timestamp}}
+Retention rules unchanged:
+- Drop the selected idea (it is now assigned to this run).
+- Drop ideas that are already implemented, obsolete, invalid, or exact duplicates.
+- Keep only ideas with `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or explicit strategic/unblocking justification in the notes.
+- If a new idea supersedes an older version, drop the older section and keep the clearer one.
 
-  Ideas are ranked by the self-improve reviewer. Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs.
+Each idea has a stable numeric ID heading of the form `## IDEA-NNN` (zero-padded to 3 digits, e.g. `## IDEA-001`). **IDs never change and are never reused** — even when an entry is removed from the backlog, its ID is retired so that historical references stay unambiguous. New ideas get the next sequential ID: scan all `IDEA-NNN` entries currently in the file (including those being removed in this run), take the maximum, and assign `MAX + 1`. Use this exact entry format:
 
-  ## Scoring Guide
+```
+## IDEA-NNN
+**Title:** <human-readable title>
+**Source:** product | engineering | backlog
+**Value:** 1-5
+**Feasibility:** 1-5
+**Safety:** 1-5
+**Composite:** 2 × Value + Feasibility + Safety
+**Status:** candidate | strategic
+**Description:** ...
+**Rationale:** ...
+**Notes:** why it remains worth considering / supersession history / ordering constraints
+```
 
-  Each idea is scored from 1 to 5 on:
-  - **Value:** user-facing product impact or ability to unblock high-value user-facing work.
-  - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
-  - **Safety:** likelihood the change can be made without regressions.
+The whole file uses this skeleton (regenerate the "Top by composite" table; leave entry order untouched):
 
-  The composite score is `Value x Feasibility x Safety`, with a maximum of 125.
+```
+# Ideas Backlog
 
-  Backlog retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes. Remove low-value, unsafe, speculative, obsolete, duplicate, or already-implemented ideas.
+Last updated: {{timestamp}}
 
-  ## 1. <Title>
-  **Source:** backlog | product | engineering
-  **Value:** 1-5
-  **Feasibility:** 1-5
-  **Safety:** 1-5
-  **Status:** candidate
-  **Description:** ...
-  **Rationale:** ...
-  **Notes:** why it remains worth considering
+Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
-  (repeat for remaining ideas)
-  ```
+## Scoring Guide
+
+Each idea is scored from 1 to 5 on:
+- **Value:** user-facing product impact or ability to unblock high-value user-facing work.
+- **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run.
+- **Safety:** likelihood the change can be made without regressions.
+
+Composite = 2 × Value + Feasibility + Safety (max 20). Value is double-weighted because user-facing impact is the rubric's primary driver — feasibility and safety are gates rather than goals.
+
+Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Feasibility >= 3` or the idea is explicitly marked as strategic/unblocking in its notes.
+
+## Top by composite
+
+| Composite | ID | Title |
+|---:|---|---|
+| <C> | IDEA-NNN | <title> |
+| ... | ... | ... |
+
+(One row per entry, sorted highest composite first. Regenerate this table every run; it is the only place that reorders.)
+
+## IDEA-001
+...
+
+## IDEA-002
+...
+```
 
 Format as a markdown file with:
 ```
@@ -85,7 +111,12 @@ Format as a markdown file with:
 ### <Title>
 **Source:** Backlog #N / Product Ideas #N / Engineering Ideas #N
 **Priority:** P0/P1/P2
+**Value:** 1-5
+**Feasibility:** 1-5
+**Safety:** 1-5
+**Composite:** 2 × Value + Feasibility + Safety (max 20)
 **Description:** ...
+**Rationale:** why this idea is worth doing now (carry forward the rationale from the source idea, refined by the debate)
 **Implementation notes:** ...
 **Validation notes:** ...
 ```

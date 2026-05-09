@@ -28,7 +28,7 @@ Score each idea using the shared backlog model:
 - **Feasibility:** confidence that the self-improve workflow can implement and validate the idea autonomously in one run
 - **Safety:** likelihood the change can be made without regressions
 
-Rank by composite score: Value x Feasibility x Safety.
+Rank by composite score: 2 × Value + Feasibility + Safety (max 20). Value is double-weighted; feasibility and safety act as gates.
 
 Format as a markdown file with:
 ```
@@ -38,7 +38,7 @@ Format as a markdown file with:
 **Value:** 1-5
 **Feasibility:** 1-5
 **Safety:** 1-5
-**Composite:** Value x Feasibility x Safety
+**Composite:** 2 × Value + Feasibility + Safety
 **Description:** ...
 **Rationale:** ...
 
