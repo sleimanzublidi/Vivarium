@@ -49,6 +49,16 @@ final class BalloonNodeTests: XCTestCase {
         XCTAssertFalse(balloon.showsDuckBadge)
     }
 
+    func test_present_errorUsesRedTextAndStroke() {
+        let balloon = BalloonNode()
+        balloon.present(header: "Project", text: "EACCES",
+                        petXInScene: 100, sceneWidth: 320,
+                        anchorY: 0, ttl: 5,
+                        isError: true)
+        XCTAssertEqual(balloon.bodyFontColor, BalloonNode.errorTextColor)
+        XCTAssertEqual(balloon.backgroundStrokeColor, BalloonNode.errorStrokeColor)
+    }
+
     /// `lastBubbleRect` is the contract SceneDirector reads to compute
     /// scene-space overlap between balloons on different pets. It must be
     /// populated after `present` and cleared by `dismiss` so a hidden
@@ -284,12 +294,14 @@ final class SceneDirectorBalloonTests: XCTestCase {
         return p
     }
 
-    private func makeDirector(maxVisiblePets: Int = 4) -> SceneDirector {
+    private func makeDirector(maxVisiblePets: Int = 4,
+                              petGap: CGFloat = 24) -> SceneDirector {
         SceneDirector(library: PetLibrary(),
                       packsByID: ["sample-pet": validPack()],
                       sceneSize: CGSize(width: 600, height: 200),
                       petScale: 1.0,
-                      maxVisiblePets: maxVisiblePets)
+                      maxVisiblePets: maxVisiblePets,
+                      petGap: petGap)
     }
 
     private func makeSession(key: String = "k1",
@@ -323,6 +335,7 @@ final class SceneDirectorBalloonTests: XCTestCase {
         let pet = director.scene.children.compactMap { $0 as? PetNode }.first
         XCTAssertNotNil(pet)
         XCTAssertFalse(pet!.balloon.isHidden)
+        XCTAssertEqual(pet!.balloon.bodyFontColor, BalloonNode.errorTextColor)
     }
 
     func test_addOrUpdate_inIdle_doesNotPresentBalloonEvenIfSet() {
@@ -370,12 +383,13 @@ final class SceneDirectorBalloonTests: XCTestCase {
     /// Two pets in a row whose bubbles genuinely share pixels: both
     /// balloons stay visible at their natural Y (no stagger shift), the
     /// newest stays at full alpha, and the older recedes via dim because
-    /// it competes for the same screen real estate. We feed both balloons
-    /// long text so each bubble grows to its per-pet cap (~pet width +
-    /// 2×overhang); at scale=1.0 with the default petGap that cap is wide
-    /// enough that adjacent bubbles overlap.
+    /// it competes for the same screen real estate. The test pins
+    /// `petGap: 0` so the bubbles overlap by a full `2×overhang` regardless
+    /// of font tweaks — without this lock, font-size adjustments shrink
+    /// the wrapped text and slip the bubbles below the overlap threshold,
+    /// turning a real bug into a test-only "regression".
     func test_newBalloonOnOnePet_keepsBothVisibleAndDimsOlder() {
-        let director = makeDirector()
+        let director = makeDirector(petGap: 0)
         let t0 = Date()
         // Long enough to push both bubbles to the per-pet width cap so
         // they actually overlap in scene space (the dim trigger).
@@ -625,12 +639,14 @@ final class SceneDirectorSlotTests: XCTestCase {
         return p
     }
 
-    private func makeDirector(maxVisiblePets: Int = 4) -> SceneDirector {
+    private func makeDirector(maxVisiblePets: Int = 4,
+                              petGap: CGFloat = 24) -> SceneDirector {
         SceneDirector(library: PetLibrary(),
                       packsByID: ["sample-pet": validPack()],
                       sceneSize: CGSize(width: 600, height: 200),
                       petScale: 1.0,
-                      maxVisiblePets: maxVisiblePets)
+                      maxVisiblePets: maxVisiblePets,
+                      petGap: petGap)
     }
 
     private func session(key: String, lastEventAt: Date) -> Session {

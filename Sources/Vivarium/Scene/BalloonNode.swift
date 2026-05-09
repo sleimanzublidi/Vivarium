@@ -22,8 +22,10 @@ final class BalloonNode: SKNode {
     static let edgeMargin: CGFloat = 4
     static let headerBodyGap: CGFloat = 2
     static let cloudBumpRadius: CGFloat = 10
-    static let cloudOutlineWidth: CGFloat = 1
+    static let cloudOutlineWidth: CGFloat = 0.5
     static let cloudOutlineColor = NSColor(white: 0.12, alpha: 1)
+    static let errorStrokeColor = NSColor(srgbRed: 0.85, green: 0.12, blue: 0.12, alpha: 1)
+    static let errorTextColor = NSColor(srgbRed: 0.72, green: 0.04, blue: 0.04, alpha: 1)
 
     /// Visual style for the balloon. `.speech` is a rounded rect with a
     /// triangular tail; `.thought` is a cloud body; `.terminal` is a dark
@@ -35,7 +37,7 @@ final class BalloonNode: SKNode {
         case duckThought
     }
 
-    private static let bodyFontSize: CGFloat = 10
+    private static let bodyFontSize: CGFloat = 11
     private static let headerFontSize: CGFloat = 9
 
     /// Fade in/out animations. Stack-layout adjustments reuse this key to
@@ -54,6 +56,13 @@ final class BalloonNode: SKNode {
     private let body: SKLabelNode
     private(set) var style: Style = .speech
     var showsDuckBadge: Bool { !duckBadge.isHidden }
+    var bodyFontColor: NSColor? { body.fontColor }
+    var backgroundStrokeColor: NSColor { background.strokeColor }
+    /// Most recent body / header text. Test hooks — production code that
+    /// needs to know what's in the balloon should read it from the
+    /// `Session` it built the balloon from.
+    var bodyText: String? { body.text }
+    var headerText: String? { header.isHidden ? nil : header.text }
 
     /// The bubble rect from the most recent `present(...)` call, in
     /// balloon-local coordinates. `nil` while hidden. SceneDirector reads
@@ -139,6 +148,7 @@ final class BalloonNode: SKNode {
                  bubbleMaxWidth: CGFloat = BalloonNode.defaultBubbleMaxWidth,
                  ttl: TimeInterval = 8.0,
                  sticky: Bool = false,
+                 isError: Bool = false,
                  style: Style = .speech)
     {
         let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,7 +162,7 @@ final class BalloonNode: SKNode {
         self.body.preferredMaxLayoutWidth = textMaxWidth
         body.text = text
         self.style = style
-        applyTextStyle(style)
+        applyTextStyle(style, isError: isError)
 
         let geom = BalloonGeometry.compute(
             headerSize: trimmedHeader.isEmpty ? .zero : self.header.calculateAccumulatedFrame().size,
@@ -252,7 +262,7 @@ final class BalloonNode: SKNode {
         tail.path = nil
     }
 
-    private func applyTextStyle(_ style: Style) {
+    private func applyTextStyle(_ style: Style, isError: Bool) {
         switch style {
         case .speech, .thought, .duckThought:
             background.fillColor = NSColor(white: 1.0, alpha: 0.95)
@@ -272,10 +282,16 @@ final class BalloonNode: SKNode {
             tail.fillColor = background.fillColor
             tail.strokeColor = background.strokeColor
             tail.lineWidth = background.lineWidth
-            header.fontName = Self.monospacedFontName(size: Self.headerFontSize - 1, weight: .regular)
+            header.fontName = Self.monospacedFontName(size: Self.headerFontSize, weight: .regular)
             header.fontColor = NSColor(white: 0.72, alpha: 1)
-            body.fontName = Self.monospacedFontName(size: Self.bodyFontSize - 1, weight: .medium)
+            body.fontName = Self.monospacedFontName(size: Self.bodyFontSize - 2, weight: .medium)
             body.fontColor = NSColor(calibratedRed: 0.62, green: 1.0, blue: 0.67, alpha: 1)
+        }
+
+        if isError {
+            background.strokeColor = Self.errorStrokeColor
+            tail.strokeColor = Self.errorStrokeColor
+            body.fontColor = Self.errorTextColor
         }
     }
 

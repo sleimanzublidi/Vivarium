@@ -59,7 +59,7 @@ final class SceneDirector {
          petScale: CGFloat,
          maxVisiblePets: Int = 4,
          balloonTTL: TimeInterval = 8.0,
-         petGap: CGFloat = 16,
+         petGap: CGFloat = 24,
          leftMargin: CGFloat = 10,
          layoutAnimationDuration: TimeInterval = 0.25)
     {
@@ -368,6 +368,7 @@ final class SceneDirector {
                              bubbleMaxWidth: bubbleMaxWidth(for: node),
                              ttl: balloonTTL,
                              sticky: true,
+                             isError: session.state == .failed,
                              style: BalloonNode.Style(visualStyle: balloon.style))
     }
 
@@ -443,8 +444,8 @@ final class SceneDirector {
               session.state == .idle,
               node.balloon.isHidden else { return }
         node.playSpawnGreeting(then: .idle)
-        node.balloon.present(header: "",
-                             text: session.project.label,
+        node.balloon.present(header: session.project.label,
+                             text: session.agent.displayName,
                              petXInScene: node.layoutTargetPosition.x,
                              sceneWidth: scene.size.width,
                              anchorY: node.size.height / 2 + 2,

@@ -89,8 +89,11 @@ final class SceneDirectorTests: XCTestCase {
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let firstPet = pets.first { $0.sessionKey == "k1" }!
         let secondPet = pets.first { $0.sessionKey == "k2" }!
-        XCTAssertEqual(firstPet.layoutTargetPosition.x, 196, accuracy: 0.001)
-        XCTAssertEqual(secondPet.layoutTargetPosition.x, 404, accuracy: 0.001)
+        // sceneCenter (300) ± interSlotSpacing/2; with petWidth=192 and the
+        // default petGap=24 the spacing is 216, so each pet sits 108pt off
+        // centre.
+        XCTAssertEqual(firstPet.layoutTargetPosition.x, 192, accuracy: 0.001)
+        XCTAssertEqual(secondPet.layoutTargetPosition.x, 408, accuracy: 0.001)
         XCTAssertEqual(firstPet.currentState, .runningLeft)
         XCTAssertEqual(firstPet.hasLayoutMovement, true)
     }
@@ -210,9 +213,9 @@ final class SceneDirectorTests: XCTestCase {
         let pets = director.scene.children.compactMap { $0 as? PetNode }
         let realPet = pets.first { $0.sessionKey == "k1" }!
         let previewPet = pets.first { $0.sessionKey == "install-preview-sample-pet" }!
-        XCTAssertEqual(realPet.layoutTargetPosition.x, 196, accuracy: 0.001,
+        XCTAssertEqual(realPet.layoutTargetPosition.x, 192, accuracy: 0.001,
                        "existing pet must shift left to make room for the preview")
-        XCTAssertEqual(previewPet.layoutTargetPosition.x, 404, accuracy: 0.001,
+        XCTAssertEqual(previewPet.layoutTargetPosition.x, 408, accuracy: 0.001,
                        "preview pet must land in the right-hand slot of the recentered row")
         XCTAssertTrue(realPet.hasLayoutMovement,
                       "existing pet must animate to its new position, not snap")
@@ -331,10 +334,14 @@ final class SceneDirectorTests: XCTestCase {
     /// neighbour's bubble (≈16 px of overlap). To make the bubble grow
     /// to that cap we feed it text long enough to fill the wrap width.
     func test_handlePetClick_undimsAndLiftsDimmedBalloon() {
+        // `petGap: 0` forces the two bubbles to overlap regardless of how
+        // much the wrapped text fills the per-pet bubble cap — the dim
+        // assertion below depends on overlap, not on text width.
         let director = SceneDirector(library: PetLibrary(),
                                      packsByID: ["sample-pet": validPack()],
                                      sceneSize: CGSize(width: 600, height: 200),
-                                     petScale: 1.0)
+                                     petScale: 1.0,
+                                     petGap: 0)
         let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
                                       label: "repo", petId: "sample-pet")
         let t = Date()
@@ -413,5 +420,28 @@ final class SceneDirectorTests: XCTestCase {
 
         XCTAssertFalse(pet.balloon.isHidden,
                        "click on idle pet with no balloon should pop the greet balloon")
+    }
+
+    /// Greet balloon shows the project label as the header and the agent's
+    /// display name as the body, so a click on an idle pet tells the user
+    /// both *which project* this pet is following and *which agent* is
+    /// driving it.
+    func test_handlePetClick_greetBalloon_showsAgentAndProject() {
+        let director = SceneDirector(library: PetLibrary(),
+                                     packsByID: ["sample-pet": validPack()],
+                                     sceneSize: CGSize(width: 600, height: 200),
+                                     petScale: 1.0)
+        let project = ProjectIdentity(url: URL(fileURLWithPath: "/repo"),
+                                      label: "my-repo", petId: "sample-pet")
+        var s = Session(agent: .copilotCli, sessionKey: "k1",
+                        project: project, startedAt: Date())
+        s.state = .idle
+        director.addOrUpdate(session: s)
+
+        let pet = director.scene.children.compactMap { $0 as? PetNode }.first!
+        director.handlePetClick(sessionKey: "k1")
+
+        XCTAssertEqual(pet.balloon.headerText, "my-repo")
+        XCTAssertEqual(pet.balloon.bodyText, AgentType.copilotCli.displayName)
     }
 }
