@@ -4,6 +4,9 @@
   "payload": {
     "session_id": "11111111-1111-1111-1111-111111111111",
     "cwd": "/Users/me/Source/foo",
-    "hook_event_name": "SubagentStop"
+    "hook_event_name": "SubagentStop",
+    "agent_id": "agent-abc123",
+    "agent_type": "Explore",
+    "last_assistant_message": "Analysis complete."
   }
 }

@@ -18,17 +18,28 @@ struct BalloonText: Equatable, Codable, Sendable {
     let text: String
     let postedAt: Date
     let style: BalloonVisualStyle
+    /// `true` if the balloon should stay visible until replaced or
+    /// dismissed by a state change (e.g. waiting/failed messages the user
+    /// needs to see). `false` if it should auto-fade after the renderer's
+    /// TTL — used for transient progress like tool-running balloons that
+    /// would otherwise linger between tool calls.
+    let sticky: Bool
 
-    init(text: String, postedAt: Date, style: BalloonVisualStyle = .speech) {
+    init(text: String,
+         postedAt: Date,
+         style: BalloonVisualStyle = .speech,
+         sticky: Bool = true) {
         self.text = text
         self.postedAt = postedAt
         self.style = style
+        self.sticky = sticky
     }
 
     private enum CodingKeys: String, CodingKey {
         case text
         case postedAt
         case style
+        case sticky
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +47,7 @@ struct BalloonText: Equatable, Codable, Sendable {
         text = try c.decode(String.self, forKey: .text)
         postedAt = try c.decode(Date.self, forKey: .postedAt)
         style = try c.decodeIfPresent(BalloonVisualStyle.self, forKey: .style) ?? .speech
+        sticky = try c.decodeIfPresent(Bool.self, forKey: .sticky) ?? true
     }
 }
 

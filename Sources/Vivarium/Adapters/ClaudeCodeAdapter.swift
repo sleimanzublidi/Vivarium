@@ -22,9 +22,22 @@ struct ClaudeCodeAdapter: EventAdapter {
         let tool_name: String?
         let tool_input: ToolInput?
         let message: String?
+        let title: String?
+        let notification_type: String?
         let prompt: String?
         let reason: String?
         let tool_response: ToolResponse?
+        // SessionStart
+        let source: String?
+        // StopFailure
+        let error: String?
+        let error_details: String?
+        // Stop / SubagentStop
+        let last_assistant_message: String?
+        // SubagentStart / SubagentStop
+        let agent_type: String?
+        // PreCompact
+        let trigger: String?
     }
 
     private struct ToolInput: Decodable {
@@ -52,6 +65,16 @@ struct ClaudeCodeAdapter: EventAdapter {
 
     private struct ToolResponse: Decodable {
         let is_error: Bool?
+        let success: Bool?
+
+        /// True iff the response unambiguously indicates a failure. The
+        /// `tool_response` schema is tool-specific: most tools surface
+        /// failure via `is_error: true`, but some (e.g. Write) report
+        /// `success: false`. Treat either as a failure so we don't mark
+        /// genuinely-failed calls as successful.
+        var didFail: Bool {
+            (is_error ?? false) || (success == false)
+        }
     }
 
     func adapt(rawJSON: Data, receivedAt: Date) -> AgentEvent? {
@@ -67,17 +90,27 @@ struct ClaudeCodeAdapter: EventAdapter {
         switch env.event {
         case "SessionStart":
             kind = .sessionStart
-            detail = nil
+            detail = env.payload.source
         case "SessionEnd":
             kind = .sessionEnd(reason: env.payload.reason)
-            detail = nil
+            detail = env.payload.reason
         case "Stop":
             kind = .turnEnd
-            detail = nil
+            detail = env.payload.last_assistant_message
         case "StopFailure":
-            let msg = env.payload.message ?? env.payload.reason ?? "Stop hook failed"
+            // StopFailure carries `error` (rate_limit, authentication_failed,
+            // billing_error, server_error, max_output_tokens, …),
+            // `error_details`, and `last_assistant_message` (the rendered
+            // API error string). The previous code looked for `message`/
+            // `reason`, which the schema doesn't include — so real events
+            // always fell through to the misleading "Stop hook failed"
+            // string. These are API/runtime failures, not hook failures.
+            let msg = env.payload.last_assistant_message
+                ?? env.payload.error_details
+                ?? env.payload.error
+                ?? "Agent run failed"
             kind = .error(message: msg)
-            detail = msg
+            detail = env.payload.error ?? msg
         case "PermissionRequest":
             let msg: String
             if let m = env.payload.message {
@@ -95,21 +128,39 @@ struct ClaudeCodeAdapter: EventAdapter {
             detail = env.payload.tool_input?.detail
         case "PostToolUse":
             guard let n = env.payload.tool_name else { return nil }
-            let ok = !(env.payload.tool_response?.is_error ?? false)
+            let ok = !(env.payload.tool_response?.didFail ?? false)
             kind = .toolEnd(name: n, success: ok)
             detail = env.payload.tool_input?.detail
         case "Notification":
-            kind = .waitingForInput(message: env.payload.message)
-            detail = env.payload.message
+            // Switch on notification_type so we don't conflate genuine
+            // "agent is waiting on user" states with informational events.
+            // - permission_prompt: already surfaced via the dedicated
+            //   PermissionRequest hook; ignore here to avoid double-firing.
+            // - auth_success: informational, not a waiting state.
+            // - elicitation_response / elicitation_complete: the MCP
+            //   elicitation has already been answered or resolved, so the
+            //   agent is no longer blocked.
+            // Unknown/missing types fall through to .waitingForInput so a
+            // future Claude Code release adding a new type keeps working.
+            switch env.payload.notification_type {
+            case "permission_prompt", "auth_success",
+                 "elicitation_response", "elicitation_complete":
+                return nil
+            default:
+                let message = composeNotificationMessage(title: env.payload.title,
+                                                        message: env.payload.message)
+                kind = .waitingForInput(message: message)
+                detail = message
+            }
         case "PreCompact":
             kind = .compacting
-            detail = nil
+            detail = env.payload.trigger
         case "SubagentStart":
             kind = .subagentStart
-            detail = nil
+            detail = env.payload.agent_type
         case "SubagentStop":
             kind = .subagentEnd
-            detail = nil
+            detail = env.payload.agent_type ?? env.payload.last_assistant_message
         case "UserPromptSubmit":
             kind = .promptSubmit(text: env.payload.prompt)
             detail = env.payload.prompt
@@ -129,5 +180,22 @@ struct ClaudeCodeAdapter: EventAdapter {
                                           hookParentPID: env.ppid,
                                           ancestors: env.ancestors ?? [])
         )
+    }
+
+    /// Combine an optional title and message into a single balloon string.
+    /// Claude Code includes `title` for richer notifications (e.g.
+    /// "Permission needed" + "Claude needs your permission to use Bash"); we
+    /// prefer the message when present and prefix the title when both exist.
+    private func composeNotificationMessage(title: String?, message: String?) -> String? {
+        switch (title, message) {
+        case let (t?, m?) where !t.isEmpty && !m.isEmpty:
+            return "\(t): \(m)"
+        case let (_, m?) where !m.isEmpty:
+            return m
+        case let (t?, _) where !t.isEmpty:
+            return t
+        default:
+            return nil
+        }
     }
 }

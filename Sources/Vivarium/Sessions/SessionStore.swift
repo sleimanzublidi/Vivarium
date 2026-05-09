@@ -185,9 +185,15 @@ actor SessionStore {
                 recordToolStart(name: n, sessionKey: event.sessionKey)
                 setState(.running, for: &s, sessionKey: event.sessionKey)
                 let presentation = ToolBalloonPresentation.presentation(for: n, detail: event.detail)
+                // Tool-running balloons are non-sticky: state stays .running
+                // through the matching PostToolUse and beyond, so without
+                // a TTL the balloon would linger after the tool finished.
+                // Auto-fade lets a still-running session reach a quiet
+                // visual state instead of pinning the last "$ ls" forever.
                 s.lastBalloon = BalloonText(text: presentation.text,
                                             postedAt: event.at,
-                                            style: presentation.style)
+                                            style: presentation.style,
+                                            sticky: false)
             case .toolEnd(let n, let success):
                 // On success, *stay* `.running`. The agent is typically still
                 // working between tool calls — flipping to `.idle` between
@@ -197,9 +203,12 @@ actor SessionStore {
                 let hadPreToolUse = consumeToolStart(name: n, sessionKey: event.sessionKey)
                 if !hadPreToolUse {
                     let presentation = ToolBalloonPresentation.presentation(for: n, detail: event.detail)
+                    // Same non-sticky reasoning as toolStart: tool balloons
+                    // describe transient progress, not user-attention state.
                     s.lastBalloon = BalloonText(text: presentation.text,
                                                 postedAt: event.at,
-                                                style: presentation.style)
+                                                style: presentation.style,
+                                                sticky: false)
                     if success {
                         setState(.running, for: &s, sessionKey: event.sessionKey)
                     }

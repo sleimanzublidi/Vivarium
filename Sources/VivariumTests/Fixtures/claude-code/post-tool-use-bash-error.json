@@ -1,0 +1,13 @@
+{
+  "agent": "claude-code",
+  "event": "PostToolUse",
+  "payload": {
+    "session_id": "11111111-1111-1111-1111-111111111111",
+    "cwd": "/Users/me/Source/foo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Bash",
+    "tool_input": { "command": "false" },
+    "tool_response": { "is_error": true, "stderr": "command failed" },
+    "tool_use_id": "toolu_01ABC123"
+  }
+}

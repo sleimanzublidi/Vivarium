@@ -367,7 +367,7 @@ final class SceneDirector {
                              anchorY: node.size.height / 2 + 2,
                              bubbleMaxWidth: bubbleMaxWidth(for: node),
                              ttl: balloonTTL,
-                             sticky: true,
+                             sticky: balloon.sticky,
                              isError: session.state == .failed,
                              style: BalloonNode.Style(visualStyle: balloon.style))
     }

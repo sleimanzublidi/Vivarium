@@ -115,6 +115,33 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(balloon?.style, .terminal)
     }
 
+    func test_toolStart_balloonIsNonSticky() async {
+        // Tool balloons must auto-fade — state stays .running through the
+        // matching toolEnd and beyond, so a sticky balloon would pin the
+        // last "$ ls" on screen until the next tool call replaces it. The
+        // renderer (SceneDirector) reads this flag to pass through to
+        // BalloonNode's TTL/auto-dismiss path.
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .toolStart(name: "Bash"),
+                                 detail: "ls",
+                                 at: clock.now))
+        let balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.sticky, false)
+    }
+
+    func test_waitingForInput_balloonIsSticky() async {
+        // Counterpoint to the tool-balloon test: balloons posted for
+        // states the user must see (.waiting, .failed) must stay up.
+        await store.apply(.init(agent: .claudeCode, sessionKey: "k1",
+                                 cwd: URL(fileURLWithPath: "/tmp"),
+                                 kind: .waitingForInput(message: "Waiting on you"),
+                                 detail: "Waiting on you",
+                                 at: clock.now))
+        let balloon = await store.snapshot().first?.lastBalloon
+        XCTAssertEqual(balloon?.sticky, true)
+    }
+
     func test_toolEndWithoutMatchingPreToolUse_synthesizesToolBalloon() async {
         await store.apply(.init(agent: .copilotCli, sessionKey: "k1",
                                  cwd: URL(fileURLWithPath: "/tmp"),

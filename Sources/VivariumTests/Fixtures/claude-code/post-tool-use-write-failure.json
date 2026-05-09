@@ -1,0 +1,13 @@
+{
+  "agent": "claude-code",
+  "event": "PostToolUse",
+  "payload": {
+    "session_id": "11111111-1111-1111-1111-111111111111",
+    "cwd": "/Users/me/Source/foo",
+    "hook_event_name": "PostToolUse",
+    "tool_name": "Write",
+    "tool_input": { "file_path": "/tmp/x.txt", "content": "hi" },
+    "tool_response": { "filePath": "/tmp/x.txt", "success": false },
+    "tool_use_id": "toolu_01DEF456"
+  }
+}
