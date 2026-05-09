@@ -37,7 +37,7 @@ struct ActiveSessionsSnapshot {
         sessions.sort { $0.startedAt < $1.startedAt }
     }
 
-    /// Build the disabled, read-only `NSMenuItem`s for the submenu. Empty
+    /// Build read-only `NSMenuItem`s for the submenu. Empty
     /// snapshot returns exactly one item with the empty-state copy; non-empty
     /// returns one row per session in `startedAt` order.
     static func makeMenuItems(sessions: [Session], now: Date) -> [NSMenuItem] {
@@ -50,7 +50,7 @@ struct ActiveSessionsSnapshot {
             let item = NSMenuItem(title: rowTitle(for: s, now: now),
                                   action: nil,
                                   keyEquivalent: "")
-            item.isEnabled = false
+            item.isEnabled = true
             return item
         }
     }

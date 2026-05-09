@@ -153,7 +153,7 @@ Set `VIVARIUM_DEBUG_GRID=1` before launching to replace the tank with a 3×3 gri
 * [ ] Rich menu bar: Always-on-Top toggle, background picker, hook installer GUI, default-pet picker, project-mappings editor, active-sessions debug list, preferences pane
 * [ ] Glob-based project override editor (`~/.vivarium/projects.json`)
 * [ ] Filesystem watching for packs added/modified outside the app
-* [ ] Persistent `SessionStore` snapshots across restarts
+* [x] Persistent `SessionStore` snapshots across restarts
 * [ ] Rotating logs (`notify.log`, `events.log`, `pets.log`)
 * [ ] Surface pack validation issues in the menu ("Pets → Issues (N)")
 * [ ] Show a ballon that looks like a terminal when running bash/shell tools.

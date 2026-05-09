@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".vivarium/settings.json")
     }()
+    private let sessionsURL: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".vivarium/sessions.json")
+    }()
     private let userPetsDir: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".vivarium/pets")
@@ -72,7 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defaultPetIDProvider: { [petRegistry] in petRegistry.defaultPetID },
             availablePetIDsProvider: { [petRegistry] in petRegistry.availablePetIDs },
             settingsStore: settingsStore)
-        store = SessionStore(resolver: resolver)
+        store = SessionStore(resolver: resolver,
+                             persistenceURL: Self.isRunningTests ? nil : sessionsURL)
 
         director = SceneDirector(library: library,
                                   packsByID: packs,
@@ -86,41 +91,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let store = self.store!
         let director = self.director!
+        let normalizer = self.normalizer
         // let alertCoordinator = self.alertCoordinator!
         Task { @MainActor in
-            for await event in await store.events() {
-                // alertCoordinator.handle(event)
-                self.activeSessionsSnapshot.apply(event)
-                switch event {
-                case .added(let s), .changed(let s):
-                    director.addOrUpdate(session: s)
-                case .removed(let s):
-                    director.remove(sessionKey: s.sessionKey)
-                }
-            }
-        }
-
-        // Skip the production socket entirely when hosted under XCTest. Tests of the
-        // app target launch the full app process; without this guard, every test pass
-        // would unlink and rebind ~/.vivarium/sock, silently stealing the path from a
-        // running production app and leaving its clients connecting to a dead inode.
-        let normalizer = self.normalizer
-        if Self.isRunningTests {
-            logger.info("XCTest host detected — skipping SocketServer startup")
-        } else {
-            do {
-                server = try SocketServer(socketURL: socketURL) { [store] line in
-                    let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
-                    if let event = normalizer.normalize(line: line) {
-                        logger.debug("sock OK agent=\(event.agent.rawValue, privacy: .public) kind=\(String(describing: event.kind), privacy: .public) sessionKey=\(event.sessionKey, privacy: .public) cwd=\(event.cwd.path, privacy: .public)")
-                        await store.apply(event)
-                    } else {
-                        logger.warning("sock DROPPED (\(line.count, privacy: .public)B) — \(preview, privacy: .public)")
+            let stream = await store.events()
+            Task { @MainActor in
+                for await event in stream {
+                    // alertCoordinator.handle(event)
+                    self.activeSessionsSnapshot.apply(event)
+                    switch event {
+                    case .added(let s), .changed(let s):
+                        director.addOrUpdate(session: s)
+                    case .removed(let s):
+                        director.remove(sessionKey: s.sessionKey)
                     }
                 }
-                try server.start()
-            } catch {
-                logger.error("socket startup failed: \(String(describing: error), privacy: .public)")
+            }
+
+            if Self.isRunningTests {
+                logger.info("XCTest host detected — skipping SessionStore restore and SocketServer startup")
+            } else {
+                await store.restore(from: self.sessionsURL)
+                self.startSocketServer(store: store, normalizer: normalizer)
             }
         }
 
@@ -139,12 +131,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installMenuBarItem()
     }
 
+    private func startSocketServer(store: SessionStore, normalizer: EventNormalizer) {
+        do {
+            server = try SocketServer(socketURL: socketURL) { line in
+                let preview = String(data: line.prefix(400), encoding: .utf8) ?? "<binary>"
+                if let event = normalizer.normalize(line: line) {
+                    logger.debug("sock OK agent=\(event.agent.rawValue, privacy: .public) kind=\(String(describing: event.kind), privacy: .public) sessionKey=\(event.sessionKey, privacy: .public) cwd=\(event.cwd.path, privacy: .public)")
+                    await store.apply(event)
+                } else {
+                    logger.warning("sock DROPPED (\(line.count, privacy: .public)B) — \(preview, privacy: .public)")
+                }
+            }
+            try server.start()
+        } catch {
+            logger.error("socket startup failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false   // menu bar app: stay alive when the floating window closes
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         server?.stop()
+        guard let store else { return }
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await store.flushSnapshot()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 1.0)
     }
 
     // MARK: - Menu bar

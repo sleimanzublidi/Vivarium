@@ -83,7 +83,7 @@ final class ActiveSessionsSnapshotTests: XCTestCase {
         XCTAssertFalse(items.first?.isEnabled ?? true)
     }
 
-    func test_makeMenuItems_nonEmptySnapshot_returnsOneDisabledRowPerSession() {
+    func test_makeMenuItems_nonEmptySnapshot_returnsOneEnabledReadOnlyRowPerSession() {
         let now = Date(timeIntervalSince1970: 1_000)
         let s1 = makeSession(key: "k1",
                              startedAt: Date(timeIntervalSince1970: 100),
@@ -99,7 +99,8 @@ final class ActiveSessionsSnapshotTests: XCTestCase {
         let items = ActiveSessionsSnapshot.makeMenuItems(sessions: [s1, s2], now: now)
         XCTAssertEqual(items.count, 2)
         for item in items {
-            XCTAssertFalse(item.isEnabled)
+            XCTAssertTrue(item.isEnabled)
+            XCTAssertNil(item.action)
             XCTAssertFalse(item.title.isEmpty)
         }
         // Order matches the input (the snapshot is responsible for sorting).

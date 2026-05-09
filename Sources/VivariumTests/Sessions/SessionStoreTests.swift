@@ -47,6 +47,16 @@ final class SessionStoreTests: XCTestCase {
                          ancestors: ancestors)
     }
 
+    private func temporarySnapshotURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SessionStoreTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return directory.appendingPathComponent("sessions.json")
+    }
+
     private func parentClaudeProcessInfo() -> AgentProcessInfo {
         processInfo([
             nonClaudeProcess(pid: 10, parentPID: 20, name: "VivariumNotify"),
@@ -429,6 +439,190 @@ final class SessionStoreTests: XCTestCase {
 
         let snap = await store.snapshot()
         XCTAssertTrue(snap.isEmpty, "sweep should have removed the stale session")
+    }
+
+    // MARK: - Snapshot persistence
+
+    func test_snapshotRoundTrip_restoreEmitsAddedSession() async throws {
+        let url = try temporarySnapshotURL()
+        let clockRef = clock!
+        let persistedStore = SessionStore(resolver: resolver,
+                                          idleTimeout: 600,
+                                          evictionSweepInterval: 0,
+                                          persistenceURL: url,
+                                          snapshotDebounce: 3_600,
+                                          now: { clockRef.now })
+        await persistedStore.apply(.init(agent: .claudeCode,
+                                         sessionKey: "k1",
+                                         cwd: URL(fileURLWithPath: "/tmp/project"),
+                                         kind: .toolStart(name: "Bash"),
+                                         detail: "git status",
+                                         at: clock.now))
+        await persistedStore.flushSnapshot()
+
+        let restoredStore = SessionStore(resolver: resolver,
+                                         idleTimeout: 600,
+                                         evictionSweepInterval: 0,
+                                         persistenceURL: url,
+                                         snapshotDebounce: 3_600,
+                                         now: { clockRef.now })
+        let addedExpectation = expectation(description: "restore emits .added")
+        let stream = await restoredStore.events()
+        var addedSession: Session?
+        let observer = Task {
+            for await event in stream {
+                if case .added(let session) = event {
+                    addedSession = session
+                    addedExpectation.fulfill()
+                    return
+                }
+            }
+        }
+
+        await restoredStore.restore(from: url)
+        await fulfillment(of: [addedExpectation], timeout: 1.0)
+        observer.cancel()
+
+        let snapshot = await restoredStore.snapshot()
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(snapshot.first, addedSession)
+        XCTAssertEqual(snapshot.first?.sessionKey, "k1")
+        XCTAssertEqual(snapshot.first?.state, .running)
+        XCTAssertEqual(snapshot.first?.lastBalloon?.text, "Bash(git)")
+    }
+
+    func test_restoreDropsStaleSessionsAndRewritesSnapshot() async throws {
+        let url = try temporarySnapshotURL()
+        let clockRef = clock!
+        let persistedStore = SessionStore(resolver: resolver,
+                                          idleTimeout: 600,
+                                          evictionSweepInterval: 0,
+                                          persistenceURL: url,
+                                          snapshotDebounce: 3_600,
+                                          now: { clockRef.now })
+        await persistedStore.apply(.init(agent: .claudeCode,
+                                         sessionKey: "stale",
+                                         cwd: URL(fileURLWithPath: "/tmp"),
+                                         kind: .sessionStart,
+                                         detail: nil,
+                                         at: clock.now))
+        await persistedStore.flushSnapshot()
+
+        clock.now = Date(timeIntervalSince1970: 700)
+        let restoredStore = SessionStore(resolver: resolver,
+                                         idleTimeout: 600,
+                                         evictionSweepInterval: 0,
+                                         persistenceURL: url,
+                                         snapshotDebounce: 3_600,
+                                         now: { clockRef.now })
+        await restoredStore.restore(from: url)
+
+        let snapshot = await restoredStore.snapshot()
+        XCTAssertTrue(snapshot.isEmpty)
+
+        await restoredStore.flushSnapshot()
+        let data = try Data(contentsOf: url)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sessions = try XCTUnwrap(object["sessions"] as? [String: Any])
+        XCTAssertTrue(sessions.isEmpty)
+    }
+
+    func test_restoreDoesNotOverwriteLiveSessionForSameKey() async throws {
+        let url = try temporarySnapshotURL()
+        let clockRef = clock!
+        let persistedStore = SessionStore(resolver: resolver,
+                                          idleTimeout: 600,
+                                          evictionSweepInterval: 0,
+                                          persistenceURL: url,
+                                          snapshotDebounce: 3_600,
+                                          now: { clockRef.now })
+        await persistedStore.apply(.init(agent: .claudeCode,
+                                         sessionKey: "k1",
+                                         cwd: URL(fileURLWithPath: "/tmp"),
+                                         kind: .error(message: "old failure"),
+                                         detail: nil,
+                                         at: clock.now))
+        await persistedStore.flushSnapshot()
+
+        clock.now = Date(timeIntervalSince1970: 10)
+        let liveStore = SessionStore(resolver: resolver,
+                                     idleTimeout: 600,
+                                     evictionSweepInterval: 0,
+                                     persistenceURL: url,
+                                     snapshotDebounce: 3_600,
+                                     now: { clockRef.now })
+        await liveStore.apply(.init(agent: .claudeCode,
+                                    sessionKey: "k1",
+                                    cwd: URL(fileURLWithPath: "/tmp"),
+                                    kind: .toolStart(name: "Read"),
+                                    detail: nil,
+                                    at: clock.now))
+
+        await liveStore.restore(from: url)
+        let snapshot = await liveStore.snapshot()
+        XCTAssertEqual(snapshot.count, 1)
+        XCTAssertEqual(snapshot.first?.state, .running)
+        XCTAssertEqual(snapshot.first?.lastBalloon?.text, "Reading")
+        XCTAssertEqual(snapshot.first?.lastEventAt, clock.now)
+        await liveStore.flushSnapshot()
+    }
+
+    func test_restoreQuarantinesCorruptSnapshot() async throws {
+        let url = try temporarySnapshotURL()
+        try Data("not json".utf8).write(to: url)
+        let clockRef = clock!
+
+        let store = SessionStore(resolver: resolver,
+                                 idleTimeout: 600,
+                                 evictionSweepInterval: 0,
+                                 persistenceURL: url,
+                                 snapshotDebounce: 3_600,
+                                 now: { clockRef.now })
+
+        await store.restore(from: url)
+        let snapshot = await store.snapshot()
+        XCTAssertTrue(snapshot.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+
+        let files = try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
+        XCTAssertTrue(files.contains { $0.hasPrefix("sessions.json.corrupt-") })
+    }
+
+    func test_debouncedSnapshotWritePersistsLatestSessionState() async throws {
+        let url = try temporarySnapshotURL()
+        let clockRef = clock!
+        let store = SessionStore(resolver: resolver,
+                                 idleTimeout: 600,
+                                 evictionSweepInterval: 0,
+                                 persistenceURL: url,
+                                 snapshotDebounce: 0.05,
+                                 now: { clockRef.now })
+
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "k1",
+                                cwd: URL(fileURLWithPath: "/tmp"),
+                                kind: .sessionStart,
+                                detail: nil,
+                                at: clock.now))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "k1",
+                                cwd: URL(fileURLWithPath: "/tmp"),
+                                kind: .toolStart(name: "Bash"),
+                                detail: nil,
+                                at: clock.now))
+        await store.apply(.init(agent: .claudeCode,
+                                sessionKey: "k1",
+                                cwd: URL(fileURLWithPath: "/tmp"),
+                                kind: .waitingForInput(message: "latest?"),
+                                detail: nil,
+                                at: clock.now))
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let data = try Data(contentsOf: url)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("\"waiting\""))
+        XCTAssertTrue(json.contains("latest?"))
     }
 
     func test_subagentDepth_tracking() async {

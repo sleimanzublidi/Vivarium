@@ -1,11 +1,16 @@
-// Vivarium/Sessions/SessionStore.swift
 import Foundation
+import OSLog
+
+private let sessionStoreLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.sleimanzublidi.vivarium.Vivarium",
+                                        category: "SessionStore")
 
 actor SessionStore {
     private let resolver: ProjectResolver
     private let idleTimeout: TimeInterval
     private let agentIdleTimeout: TimeInterval
     private let completionAnimationDuration: TimeInterval
+    private let persistenceURL: URL?
+    private let snapshotDebounce: TimeInterval
     private let now: () -> Date
 
     private var sessions: [String: Session] = [:]    // keyed by sessionKey
@@ -18,6 +23,7 @@ actor SessionStore {
     private var sessionProcessAncestors: [String: [ProcessAncestor]] = [:]
     private var childSessionAliases: [String: ChildSessionAlias] = [:]
     private var sweepTask: Task<Void, Never>?
+    private var snapshotWriteTask: Task<Void, Never>?
 
     /// - parameters:
     ///   - idleTimeout: how long a session can sit with no events before
@@ -38,12 +44,16 @@ actor SessionStore {
          agentIdleTimeout: TimeInterval = 30,
          completionAnimationDuration: TimeInterval = 1.8,
          evictionSweepInterval: TimeInterval = 30,
+         persistenceURL: URL? = nil,
+         snapshotDebounce: TimeInterval = 0.25,
          now: @escaping @Sendable () -> Date = { Date() })
     {
         self.resolver = resolver
         self.idleTimeout = idleTimeout
         self.agentIdleTimeout = agentIdleTimeout
         self.completionAnimationDuration = completionAnimationDuration
+        self.persistenceURL = persistenceURL
+        self.snapshotDebounce = snapshotDebounce
         self.now = now
 
         if evictionSweepInterval > 0 {
@@ -60,6 +70,7 @@ actor SessionStore {
 
     deinit {
         sweepTask?.cancel()
+        snapshotWriteTask?.cancel()
     }
 
     private func installEvictionSweep(interval: TimeInterval) {
@@ -96,18 +107,21 @@ actor SessionStore {
     }
 
     func apply(_ event: AgentEvent) {
+        let before = sessions
         if let alias = resolveChildAlias(for: event) {
             applyAliasedChildEvent(event, parentKey: alias.parentKey, isNewAlias: alias.isNew)
+            scheduleSnapshotWriteIfNeeded(previousSessions: before)
             return
         }
 
         applyDirect(event)
         if !isSessionEnd(event.kind) {
             registerProcessPIDs(from: event.processInfo,
-                                to: event.sessionKey,
-                                onlyWhenUnambiguousRoot: true)
+                                 to: event.sessionKey,
+                                 onlyWhenUnambiguousRoot: true)
             retroactivelyAliasChildren(to: event.sessionKey)
         }
+        scheduleSnapshotWriteIfNeeded(previousSessions: before)
     }
 
     private func applyDirect(_ event: AgentEvent) {
@@ -419,6 +433,7 @@ actor SessionStore {
     }
 
     private func temporaryStateExpired(for sessionKey: String) {
+        let before = sessions
         temporaryStateTimers.removeValue(forKey: sessionKey)
         guard let fallback = temporaryFallbackStates.removeValue(forKey: sessionKey),
               var session = sessions[sessionKey],
@@ -428,6 +443,7 @@ actor SessionStore {
         session.state = fallback
         sessions[sessionKey] = session
         emit(.changed(session))
+        scheduleSnapshotWriteIfNeeded(previousSessions: before)
     }
 
     // MARK: - Idle-timeout fallback
@@ -456,6 +472,7 @@ actor SessionStore {
     }
 
     private func idleTimerFired(for key: String) {
+        let before = sessions
         idleTimers.removeValue(forKey: key)
         guard var s = sessions[key] else { return }
         guard !Self.needsAttention(s.state) else { return }
@@ -463,6 +480,7 @@ actor SessionStore {
         setTemporaryState(.jumping, fallback: .idle, for: &s, sessionKey: key)
         sessions[key] = s
         emit(.changed(s))
+        scheduleSnapshotWriteIfNeeded(previousSessions: before)
     }
 
     /// States we never auto-idle out of — the user is expected to act.
@@ -475,6 +493,7 @@ actor SessionStore {
     /// pet. The persistent choice (next-launch / next-session) is owned by
     /// `GlobalSettingsStore`; this only touches in-memory sessions.
     func setPetID(_ petID: String, forProject projectURL: URL, agent: AgentType) {
+        let before = sessions
         for (key, var s) in sessions where s.agent == agent && s.project.url == projectURL {
             guard s.project.petId != petID else { continue }
             s.project = ProjectIdentity(url: s.project.url,
@@ -483,9 +502,11 @@ actor SessionStore {
             sessions[key] = s
             emit(.changed(s))
         }
+        scheduleSnapshotWriteIfNeeded(previousSessions: before)
     }
 
     func evictStale() {
+        let before = sessions
         let cutoff = now().addingTimeInterval(-idleTimeout)
         for (key, s) in sessions where s.lastEventAt < cutoff {
             sessions.removeValue(forKey: key)
@@ -494,10 +515,156 @@ actor SessionStore {
             cleanupSessionProcessMetadata(for: key)
             emit(.removed(s))
         }
+        scheduleSnapshotWriteIfNeeded(previousSessions: before)
+    }
+
+    // MARK: - Snapshot persistence
+
+    /// Restore persisted sessions without overwriting any session already seen
+    /// from live events. This keeps lenient session creation authoritative when
+    /// a socket event races app startup restore for the same `sessionKey`.
+    func restore(from explicitURL: URL? = nil) {
+        guard let url = explicitURL ?? persistenceURL else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let snapshot: SessionStoreSnapshot
+        do {
+            let data = try Data(contentsOf: url)
+            snapshot = try JSONDecoder().decode(SessionStoreSnapshot.self, from: data)
+        } catch {
+            sessionStoreLogger.error("Failed to restore SessionStore snapshot at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            quarantineSnapshot(at: url)
+            return
+        }
+
+        let before = sessions
+        let cutoff = now().addingTimeInterval(-idleTimeout)
+        var shouldRewriteSnapshot = false
+        var restored: [Session] = []
+
+        for (key, record) in snapshot.sessions {
+            let session = record.sessionWithSnapshotLastEventAt
+            guard key == session.sessionKey else {
+                shouldRewriteSnapshot = true
+                continue
+            }
+            guard session.lastEventAt >= cutoff else {
+                shouldRewriteSnapshot = true
+                continue
+            }
+            guard sessions[key] == nil else {
+                shouldRewriteSnapshot = true
+                continue
+            }
+            sessions[key] = session
+            restored.append(session)
+        }
+
+        for session in restored.sorted(by: { $0.startedAt < $1.startedAt }) {
+            emit(.added(session))
+        }
+
+        if shouldRewriteSnapshot || sessions != before {
+            scheduleSnapshotWrite()
+        }
+    }
+
+    func flushSnapshot() async {
+        snapshotWriteTask?.cancel()
+        snapshotWriteTask = nil
+        await writeSnapshot()
+    }
+
+    private func scheduleSnapshotWriteIfNeeded(previousSessions: [String: Session]) {
+        guard sessions != previousSessions else { return }
+        scheduleSnapshotWrite()
+    }
+
+    private func scheduleSnapshotWrite() {
+        guard persistenceURL != nil else { return }
+        snapshotWriteTask?.cancel()
+
+        let delay = max(0, snapshotDebounce)
+        snapshotWriteTask = Task { [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                if Task.isCancelled { return }
+            }
+            await self?.writeSnapshot()
+        }
+    }
+
+    private func writeSnapshot() async {
+        guard let url = persistenceURL else { return }
+        snapshotWriteTask = nil
+        let snapshot = SessionStoreSnapshot(sessions: sessions, savedAt: now())
+
+        do {
+            try await Self.write(snapshot: snapshot, to: url)
+            sessionStoreLogger.debug("Wrote SessionStore snapshot with \(snapshot.sessions.count, privacy: .public) sessions")
+        } catch {
+            sessionStoreLogger.error("Failed to write SessionStore snapshot at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private static func write(snapshot: SessionStoreSnapshot, to url: URL) async throws {
+        try await Task.detached(priority: .utility) {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try data.write(to: url, options: [.atomic])
+        }.value
+    }
+
+    private func quarantineSnapshot(at url: URL) {
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: now())
+            .replacingOccurrences(of: ":", with: "")
+        let quarantineURL = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).corrupt-\(timestamp)")
+        do {
+            if FileManager.default.fileExists(atPath: quarantineURL.path) {
+                try FileManager.default.removeItem(at: quarantineURL)
+            }
+            try FileManager.default.moveItem(at: url, to: quarantineURL)
+            sessionStoreLogger.warning("Moved unreadable SessionStore snapshot to \(quarantineURL.path, privacy: .public)")
+        } catch {
+            sessionStoreLogger.error("Failed to quarantine SessionStore snapshot at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func emit(_ e: SessionStoreEvent) {
         for c in continuations.values { c.yield(e) }
+    }
+}
+
+private struct SessionStoreSnapshot: Codable, Sendable {
+    var version: Int
+    var savedAt: Date
+    var sessions: [String: SessionSnapshotRecord]
+
+    init(version: Int = 1, sessions: [String: Session], savedAt: Date) {
+        self.version = version
+        self.savedAt = savedAt
+        self.sessions = sessions.mapValues(SessionSnapshotRecord.init(session:))
+    }
+}
+
+private struct SessionSnapshotRecord: Codable, Sendable {
+    var session: Session
+    var lastEventAt: Date
+
+    init(session: Session) {
+        self.session = session
+        self.lastEventAt = session.lastEventAt
+    }
+
+    var sessionWithSnapshotLastEventAt: Session {
+        var restored = session
+        restored.lastEventAt = lastEventAt
+        return restored
     }
 }
 
