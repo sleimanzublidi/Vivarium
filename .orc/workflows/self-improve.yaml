@@ -6,6 +6,7 @@
 #   orc start self-improve
 #   orc start self-improve --input agent="copilot"
 #   orc start self-improve --input review_iterations="5"
+#   orc start self-improve --input build_command="bash Scripts/build" --input validate_command="bash Scripts/validate"
 name: self-improve
 description: Autonomous self-improvement cycle that generates product and engineering ideas, debates and ranks them, creates an isolated git worktree for the top qualifying pick, validates the tool, runs iterative code review, and commits any remaining changes.
 
@@ -16,6 +17,12 @@ input:
   - name: review_iterations
     type: string
     default: "3"
+  - name: build_command
+    type: string
+    default: "bash Scripts/build.sh --debug"
+  - name: validate_command
+    type: string
+    default: "bash Scripts/validate.sh"
 
 nodes:
   - id: setup
@@ -48,7 +55,8 @@ nodes:
     command: |
       set -eu
       BRANCH="self-improve/{{timestamp}}"
-      WORKTREE="$(dirname "{{repo_root}}")/Orc-self-improve-{{timestamp}}"
+      REPO_NAME="$(basename "{{repo_root}}")"
+      WORKTREE="$(dirname "{{repo_root}}")/${REPO_NAME}-self-improve-{{timestamp}}"
       git worktree add -b "$BRANCH" "$WORKTREE" HEAD
       mkdir -p "$WORKTREE/.orc/self-improve"
       cp -R "{{orc_root}}/self-improve/." "$WORKTREE/.orc/self-improve/"
@@ -88,6 +96,15 @@ nodes:
     prompt_file: "{{orc_root}}/prompts/adversarial-reviewer.md"
     parameters:
       permission_mode: bypassPermissions
+    output: reviewer_output
+
+  # Deterministic path to the tasks file written by adversarial-reviewer.
+  # Captured here (not from the agent's stdout) to avoid downstream nodes
+  # interpolating prose that contains backticks/paths into shell commands.
+  - id: tasks-file
+    agent: shell
+    depends_on: adversarial-reviewer
+    command: 'printf "%s/.orc/self-improve/%s-tasks.md" "{{worktree_path}}" "{{timestamp}}"'
     output: tasks_file
 
   - id: software-engineer
@@ -108,6 +125,8 @@ nodes:
       worktree_path: "{{worktree_path}}"
       agent: "{{agent}}"
       validation_report: "{{worktree_path}}/.orc/self-improve/{{timestamp}}-validation.md"
+      build_command: "{{build_command}}"
+      validate_command: "{{validate_command}}"
 
   - id: fix-loop
     workflow: .orc/workflows/fix-loop.yaml
@@ -144,7 +163,7 @@ nodes:
 
   - id: task-decision
     agent: shell
-    depends_on: adversarial-reviewer
+    depends_on: tasks-file
     command: |
       if grep -Eq '^\*\*Decision:\*\* NOOP[[:space:]]*$' "{{tasks_file}}"; then
         printf 'NOOP'

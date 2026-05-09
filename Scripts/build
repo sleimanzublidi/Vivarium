@@ -2,17 +2,17 @@
 # build — produce Vivarium.app you can run without Xcode.
 #
 # Builds the Vivarium scheme into <repo>/build/ via xcodebuild and prints the
-# path of the resulting .app bundle. Defaults to Release; pass --debug for
-# a debug build. Pass --open to launch the .app once it's built.
+# path of the resulting .app bundle. Defaults to Debug; pass --release for
+# a release build. Pass --open to launch the .app once it's built.
 #
 # Usage:
-#   ./Scripts/build              # Release build
-#   ./Scripts/build --debug      # Debug build
+#   ./Scripts/build              # Debug build
+#   ./Scripts/build --release    # Release build
 #   ./Scripts/build --open       # Build Release and `open` the resulting .app
 
 set -euo pipefail
 
-CONFIG="Release"
+CONFIG="Debug"
 OPEN_AFTER=0
 
 while [[ $# -gt 0 ]]; do

@@ -123,16 +123,16 @@ For the architecture, event pipeline, state machine, and pack contract, see [Doc
    ```
 3. Build the app
    ```sh
-   ./Scripts/build           # Release build of Vivarium.app
-   ./Scripts/build --open    # …and launch it
+   ./Scripts/build.sh --release # Release build of Vivarium.app
+   ./Scripts/build.sh --open    # …and launch it
    ```
    The `.app` lands at `.build/Build/Products/Release/Vivarium.app`.
 4. Install agent hooks
    ```sh
-   ./Scripts/setup --claude          # Claude Code (user-global)
-   ./Scripts/setup --copilot         # Copilot CLI  (user-global)
-   ./Scripts/setup --copilot-repo .  # Copilot CLI  (per-repo opt-in)
-   ./Scripts/setup --both            # both user-global
+   ./Scripts/setup.sh --claude          # Claude Code (user-global)
+   ./Scripts/setup.sh --copilot         # Copilot CLI  (user-global)
+   ./Scripts/setup.sh --copilot-repo .  # Copilot CLI  (per-repo opt-in)
+   ./Scripts/setup.sh --both            # both user-global
    ```
    The script copies a small `notify` helper to `~/.vivarium/notify` and idempotently merges hook entries into the chosen agent settings files. Existing entries owned by other tools are preserved; previous Vivarium entries are stripped and re-added on every run. Backups of any modified settings files are written alongside as `*.vivarium.bak`.
 

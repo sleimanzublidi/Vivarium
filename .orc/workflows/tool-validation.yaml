@@ -1,14 +1,15 @@
-# Tool validation workflow — builds the binary, then runs validate.sh in a loop.
+# Tool validation workflow — builds the binary, then runs the validate command in a loop.
 # If validation fails, a fixer agent reads the output and patches the code.
-# Repeats until validate.sh passes or max iterations reached.
+# Repeats until validation passes or max iterations reached.
 #
 # Usage:
 #   orc start tool-validation
 #   orc start tool-validation --input agent="copilot"
 #   orc start tool-validation --input worktree_path="/path/to/worktree"
 #   orc start tool-validation --input validation_report="/path/to/report.md"
+#   orc start tool-validation --input build_command="bash Scripts/build" --input validate_command="bash Scripts/validate"
 name: tool-validation
-description: Build and validate the orc binary via smoke tests. Loops fix attempts until validation passes.
+description: Build and validate the project via smoke tests. Loops fix attempts until validation passes.
 
 input:
   - name: agent
@@ -20,11 +21,17 @@ input:
   - name: validation_report
     type: string
     default: "{{repo_root}}/.orc/self-improve/validation.md"
+  - name: build_command
+    type: string
+    default: "bash Scripts/build.sh"
+  - name: validate_command
+    type: string
+    default: "bash Scripts/validate.sh"
 
 nodes:
   - id: build
     agent: shell
-    command: "cd {{worktree_path}} && bash Scripts/build.sh"
+    command: "cd {{worktree_path}} && {{build_command}}"
     on_failure: continue
     output: build_result
 
@@ -42,11 +49,11 @@ nodes:
 
       Work exclusively in the git worktree at `{{worktree_path}}`.
 
-      1. Run `cd {{worktree_path}} && bash Scripts/validate.sh` yourself to reproduce the failures.
-      2. Read the failing assertion(s) and trace them back to the orc source code.
-      3. Fix the root cause in the Swift source — do NOT weaken assertions or edit validate.sh.
-      4. Rebuild with `cd {{worktree_path}} && bash Scripts/build.sh`.
-      5. Re-run `cd {{worktree_path}} && bash Scripts/validate.sh` to confirm your fix.
+      1. Run `cd {{worktree_path}} && {{validate_command}}` yourself to reproduce the failures.
+      2. Read the failing assertion(s) and trace them back to the source code.
+      3. Fix the root cause in the source — do NOT weaken assertions or edit the validation script.
+      4. Rebuild with `cd {{worktree_path}} && {{build_command}}`.
+      5. Re-run `cd {{worktree_path}} && {{validate_command}}` to confirm your fix.
       6. When validation passes, output ONLY `APPROVED`.
     output: fix_result
     loop:
@@ -64,10 +71,10 @@ nodes:
       BUILD_STATUS="FAIL"
       VALIDATE_STATUS="FAIL"
       cd "{{worktree_path}}"
-      if bash Scripts/build.sh >"$BUILD_LOG" 2>&1; then
+      if {{build_command}} >"$BUILD_LOG" 2>&1; then
         BUILD_STATUS="PASS"
       fi
-      if [ "$BUILD_STATUS" = "PASS" ] && bash Scripts/validate.sh >"$VALIDATE_LOG" 2>&1; then
+      if [ "$BUILD_STATUS" = "PASS" ] && {{validate_command}} >"$VALIDATE_LOG" 2>&1; then
         VALIDATE_STATUS="PASS"
       fi
       {
