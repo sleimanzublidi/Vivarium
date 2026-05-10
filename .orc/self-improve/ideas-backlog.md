@@ -1,6 +1,6 @@
 # Ideas Backlog
 
-Last updated: 20260509-194814
+Last updated: 20260509-195906
 
 Selected or completed ideas are removed; unresolved high-value ideas stay eligible for future runs. **Entries are kept in insertion order — do not reorder or renumber them.** Use the "Top by composite" table below for ranking; that is the only ranked view.
 
@@ -25,6 +25,8 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 | 16 | IDEA-009 | Explain agent capability differences in product |
 | 16 | IDEA-010 | Quarantine corrupt global settings before writing defaults |
 | 16 | IDEA-016 | Show active helper-agent activity on pets |
+| 16 | IDEA-017 | Privacy mode for public screens |
+| 16 | IDEA-018 | Preserve per-connection hook event ordering in SocketServer |
 | 15 | IDEA-004 | First-run onboarding window and GUI hook installer |
 | 15 | IDEA-015 | Let users dismiss stale pets |
 | 14 | IDEA-005 | Rotating NDJSON event log at `~/.vivarium/events.log` |
@@ -201,3 +203,27 @@ Retention rule: keep an idea only if `Value >= 3`, `Safety >= 3`, and either `Fe
 **Description:** When an agent has helper work active in the background, show a small visual badge or stacked indicator on that session's pet, clearing it when helper activity finishes. The indicator should be subtle, readable at tank size, and avoid changing the pet's main state animation.
 **Rationale:** Users can currently see that an agent is running, waiting, or failing, but not whether visible work represents a single turn or delegated background activity. `Session.subagentDepth` is already tracked and the state-mapping docs explicitly reserve it for a future visual badge, so this turns captured signal into an understandable product cue.
 **Notes:** Retained as distinct from IDEA-009: that entry explains agent capability differences, while this changes Claude helper activity rendering. Keep the first slice render-only and driven by existing `subagentDepth` so Copilot sessions, which do not expose subagent events, remain unchanged.
+
+## IDEA-017
+**Title:** Privacy mode for public screens
+**Source:** product
+**Value:** 5
+**Feasibility:** 3
+**Safety:** 3
+**Composite:** 16
+**Status:** candidate
+**Description:** Add a clear privacy mode that hides or generalizes sensitive text in pet balloons, active-session/status surfaces, and other visible details while preserving state animations and enough generic context to remain useful. The first implementation should be a fast menu toggle that suppresses prompts, command details, project names, error text, and latest-message copy from public display.
+**Rationale:** Vivarium is intentionally glanceable and can sit above other windows, which means it can expose private project names, prompts, commands, or errors during screen sharing, demos, pairing, or coworking. A privacy mode keeps the product usable in public contexts instead of encouraging users to hide or quit it whenever sensitive work starts.
+**Notes:** Retained after adversarial review because the product value is high, but Feasibility and Safety are reduced from the upstream proposal: this cuts across balloons, menus, logs/status copy, and future details surfaces, and an incomplete implementation can create a false sense of privacy. Implementation must inventory every user-visible text surface and prefer generic state labels over ad hoc redaction.
+
+## IDEA-018
+**Title:** Preserve per-connection hook event ordering in SocketServer
+**Source:** engineering
+**Value:** 4
+**Feasibility:** 4
+**Safety:** 4
+**Composite:** 16
+**Status:** candidate
+**Description:** Dispatch NDJSON lines from each client connection in read order instead of launching an independent unstructured task per line. `SocketServer.readLoop(fd:)` parses newline-delimited records sequentially, but then calls `Task { await self.onLine(line) }` for every line, allowing one hook client's lifecycle events to be applied out of order when the async handler awaits `SessionStore.apply(_:)`.
+**Rationale:** Out-of-order lifecycle events can produce visible wrong state. For example, if `SessionEnd` is applied before an earlier tool event, the end can be a no-op for an unknown session and a later lenient event can recreate a running ghost pet. The app's design relies on hook ordering to keep the ambient pet state trustworthy.
+**Notes:** Retained as a real correctness bug with direct user-facing symptoms, distinct from the setup/selftest and event-log backlog entries. A safe implementation should preserve ordering only within a single accepted connection while keeping different client connections independent, and should add a regression test with delayed handlers to prove final session state is correct.
