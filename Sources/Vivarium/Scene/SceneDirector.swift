@@ -31,8 +31,8 @@ final class SceneDirector {
     private let petScale: CGFloat
     private let interSlotSpacing: CGFloat
     private let balloonTTL: TimeInterval
-    private let maxVisiblePets: Int
     private let layoutAnimationDuration: TimeInterval
+    private let background: BackgroundNode
 
     /// Alpha for every non-newest balloon. Older balloons stay at their
     /// natural Y (we don't push them up — that risks clipping them off the
@@ -51,13 +51,10 @@ final class SceneDirector {
     /// to half the pet height to derive `groundY`.
     static let petBottomPadding: CGFloat = 2
 
-    private var overflowLabel: SKLabelNode?
-
     init(library: PetLibrary,
          packsByID: [String: PetPack],
          sceneSize: CGSize,
          petScale: CGFloat,
-         maxVisiblePets: Int = 4,
          balloonTTL: TimeInterval = 8.0,
          petGap: CGFloat = 24,
          leftMargin: CGFloat = 10,
@@ -66,29 +63,61 @@ final class SceneDirector {
         self.library = library
         self.packsByID = packsByID
         self.petScale = petScale
-        self.maxVisiblePets = maxVisiblePets
         self.layoutAnimationDuration = layoutAnimationDuration
         self.balloonTTL = balloonTTL
         // Kept for call-site compatibility; centered layout no longer uses a fixed left margin.
         _ = leftMargin
         let petWidth = CGFloat(CodexLayout.frameWidth) * petScale
         self.interSlotSpacing = petWidth + petGap
-        let scene = SKScene(size: sceneSize)
-        scene.scaleMode = .aspectFit
+        let scene = TankScene(size: sceneSize)
+        // `.resizeFill` keeps the scene's coordinate space in sync with the
+        // SKView's pixel size, so resizing the floating tank window enlarges
+        // the *area* pets roam in instead of scaling their sprites.
+        scene.scaleMode = .resizeFill
         scene.backgroundColor = .black
         let background = BackgroundNode(size: sceneSize)
-        // Sit behind every pet, balloon, and overflow indicator. Pet/balloon
-        // z values start at 0/110 respectively; -100 keeps the backdrop clear
-        // of those layers without us having to thread a constant.
+        // Sit behind every pet and balloon. Pet/balloon z values start at
+        // 0/110 respectively; -100 keeps the backdrop clear of those
+        // layers without us having to thread a constant.
         background.zPosition = -100
         scene.addChild(background)
         self.scene = scene
+        self.background = background
         self.groundY = CGFloat(CodexLayout.frameHeight) * petScale / 2 + Self.petBottomPadding
+
+        scene.onSizeChanged = { [weak self] newSize in
+            self?.handleSceneResized(to: newSize)
+        }
+        scene.onLiveResizeEnded = { [weak self] in
+            self?.handleLiveResizeEnded()
+        }
     }
 
-    /// Add a new session, or update an existing one. Reconciles the visible
-    /// set against `maxVisiblePets`, plays the new state, and presents a
-    /// balloon if there's a fresh one.
+    /// React to the floating tank's scene size changing. The backdrop
+    /// regrows on every step (including each frame of a live drag) so the
+    /// roaming area visibly expands as the user pulls the resize handle.
+    /// Pets are *not* re-laid out mid-drag — they stay parked where they
+    /// were and animate to their new centered positions in
+    /// `handleLiveResizeEnded` after the user releases. groundY is
+    /// independent of scene height, so pets stay anchored to the bottom
+    /// strip during the resize regardless.
+    private func handleSceneResized(to size: CGSize) {
+        background.resize(to: size)
+        if scene.view?.inLiveResize == true { return }
+        applyCenteredLayout(newlySpawnedKeys: [])
+    }
+
+    /// User finished dragging the resize handle. Animate pets running to
+    /// their new centered slots — `applyCenteredLayout`'s animated path
+    /// already plays the runningLeft/runningRight gait while pets move
+    /// and snaps them back to their steady state on arrival.
+    private func handleLiveResizeEnded() {
+        applyCenteredLayout(newlySpawnedKeys: [])
+    }
+
+    /// Add a new session, or update an existing one. Reconciles the
+    /// rendered set against the known sessions, plays the new state, and
+    /// presents a balloon if there's a fresh one.
     func addOrUpdate(session: Session) {
         if let text = session.lastBalloon?.text, !text.isEmpty {
             logger.debug("\(session.project.label, privacy: .public):\(session.agent.rawValue, privacy: .public) \(session.project.petId, privacy: .public) \(session.state.rawValue, privacy: .public) '\(text, privacy: .public)'")
@@ -128,8 +157,6 @@ final class SceneDirector {
     var visiblePetCount: Int { nodes.count }
     /// Slot index assigned to a session, if it's currently visible. Test hook.
     func slot(for sessionKey: String) -> Int? { slotForSession[sessionKey] }
-    /// Current overflow text, if any. Test hook.
-    var overflowText: String? { overflowLabel?.text }
     /// Number of install-preview pets currently rendered. Test hook.
     var previewPetCount: Int { previewNodes.count }
 
@@ -169,15 +196,11 @@ final class SceneDirector {
                            petScale: petScale)
         node.zPosition = 50
         // Park the preview at scene center until the layout pass picks its X.
-        // For the no-slot fallback (row already full) this is also the final
-        // position.
         node.position = CGPoint(x: scene.size.width / 2, y: groundY)
         scene.addChild(node)
         previewNodes[packID] = node
         previewTokens[packID] = token
-        if let slot = firstFreeSlot(capacity: maxVisiblePets) {
-            previewSlots[packID] = slot
-        }
+        previewSlots[packID] = firstFreeSlot()
 
         // Re-center the row with the preview included: existing real pets
         // animate sideways to make room, the new preview snaps to its slot.
@@ -207,22 +230,21 @@ final class SceneDirector {
 
     // MARK: - Visibility reconciliation
 
-    /// Decide which `maxVisiblePets` sessions get pets in the scene
-    /// (most-recent `lastEventAt` wins per spec §8), sync the scene to
-    /// match, then recenter the rendered row.
+    /// Spawn a pet for every known session and despawn pets whose session
+    /// is gone, then recenter the row. There is no visibility cap — every
+    /// active session gets a slot.
     private func reconcileVisibility() {
-        let sortedDesc = sessions.values.sorted { $0.lastEventAt > $1.lastEventAt }
-        let visibleKeys = Set(sortedDesc.prefix(maxVisiblePets).map(\.sessionKey))
+        let allKeys = Set(sessions.keys)
 
-        // Despawn anything that fell out of the visible set.
-        for key in Array(nodes.keys) where !visibleKeys.contains(key) {
+        // Despawn anything whose session was removed.
+        for key in Array(nodes.keys) where !allKeys.contains(key) {
             despawn(sessionKey: key)
         }
 
-        // Spawn anything newly visible. Sort by sessionKey for deterministic
-        // slot assignment when multiple new pets appear in the same tick.
-        let newlyVisible = sortedDesc
-            .prefix(maxVisiblePets)
+        // Spawn anything that doesn't yet have a node. Sort by sessionKey
+        // for deterministic slot assignment when multiple sessions appear
+        // in the same tick.
+        let newlyVisible = sessions.values
             .filter { nodes[$0.sessionKey] == nil }
             .sorted { $0.sessionKey < $1.sessionKey }
         var newlySpawnedKeys = Set<String>()
@@ -232,9 +254,6 @@ final class SceneDirector {
         }
 
         applyCenteredLayout(newlySpawnedKeys: newlySpawnedKeys)
-
-        let hidden = max(0, sessions.count - maxVisiblePets)
-        updateOverflowIndicator(hiddenCount: hidden)
     }
 
     private func spawn(session: Session) {
@@ -253,18 +272,12 @@ final class SceneDirector {
     /// Lowest free slot index across both real pets and active install
     /// previews, so a freshly spawned real pet doesn't collide with a slot
     /// that's currently occupied by a preview pet.
-    private func firstFreeSlot(capacity: Int? = nil) -> Int? {
+    private func firstFreeSlot() -> Int {
         let used = Set(slotForSession.values).union(previewSlots.values)
         var slot = 0
         while used.contains(slot) { slot += 1 }
-        if let capacity, slot >= capacity { return nil }
         return slot
     }
-
-    /// Convenience for `firstFreeSlot(capacity:)` with no cap. Real-pet
-    /// spawns are bounded by `maxVisiblePets` upstream in `reconcileVisibility`,
-    /// so we don't cap here.
-    private func firstFreeSlot() -> Int { firstFreeSlot(capacity: nil)! }
 
     private func despawn(sessionKey: String) {
         guard let node = nodes.removeValue(forKey: sessionKey) else { return }
@@ -486,29 +499,22 @@ final class SceneDirector {
         }
     }
 
-    // MARK: - Overflow indicator
+}
 
-    private func updateOverflowIndicator(hiddenCount: Int) {
-        guard hiddenCount > 0 else {
-            overflowLabel?.removeFromParent()
-            overflowLabel = nil
-            return
-        }
-        let label: SKLabelNode
-        if let existing = overflowLabel {
-            label = existing
-        } else {
-            label = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
-            label.fontSize = 11
-            label.fontColor = .white
-            label.horizontalAlignmentMode = .right
-            label.verticalAlignmentMode = .top
-            label.zPosition = 200
-            scene.addChild(label)
-            overflowLabel = label
-        }
-        label.text = "+\(hiddenCount)"
-        label.position = CGPoint(x: scene.size.width - 6, y: scene.size.height - 4)
+/// SKScene subclass that surfaces SpriteKit's `didChangeSize` callback as
+/// a closure plus a separate "live resize ended" hook. Together they let
+/// `SceneDirector` track the floating-tank window in real time for the
+/// backdrop while reserving the pet relayout for the moment the user lets
+/// go of the resize handle. The end-of-resize callback is fired by
+/// `PetDropSKView.viewDidEndLiveResize`.
+final class TankScene: SKScene {
+    var onSizeChanged: ((CGSize) -> Void)?
+    var onLiveResizeEnded: (() -> Void)?
+
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        guard size != oldSize else { return }
+        onSizeChanged?(size)
     }
 }
 

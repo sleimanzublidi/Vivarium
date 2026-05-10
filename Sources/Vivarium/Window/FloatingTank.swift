@@ -284,16 +284,71 @@ final class PetDropSKView: SKView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         registerForDraggedTypes([.fileURL])
+        configureLiveResizeBehavior()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         registerForDraggedTypes([.fileURL])
+        configureLiveResizeBehavior()
+    }
+
+    /// Stop AppKit's live-resize compositor from stretching the SKView's
+    /// previously-rendered drawable to fill the new window bounds. Without
+    /// this, pets and backdrop visually stretch as the user drags the
+    /// resize handle even though SpriteKit is happily redrawing each frame.
+    ///
+    /// `layerContentsPlacement = .bottomLeft` anchors existing layer
+    /// content at the bottom-left (matching the scene's coordinate origin),
+    /// so any new pixels beyond the previous bounds appear transparent
+    /// until SpriteKit's next frame paints over them — much cleaner than
+    /// stretching.
+    /// `layerContentsRedrawPolicy = .duringViewResize` asks AppKit to
+    /// invalidate the layer on every step of the live resize so SpriteKit
+    /// gets a chance to render at the correct size each frame.
+    private func configureLiveResizeBehavior() {
+        layerContentsPlacement = .bottomLeft
+        layerContentsRedrawPolicy = .duringViewResize
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // The CAMetalLayer that backs SKView is created lazily; mirror the
+        // anchor onto it once the view has a window so the live-resize
+        // compositor honours it for the Metal-rendered drawable too.
+        layer?.contentsGravity = .bottomLeft
+    }
+
+    /// Paint the layer's exposed area with a solid backing colour during a
+    /// live resize so the borderless tank window has a visible silhouette
+    /// (and macOS draws its window shadow around the full new bounds)
+    /// while SpriteKit catches up to the new size. We restore a clear
+    /// background at the end so balloons' anti-aliased rounded edges stay
+    /// transparent against the desktop the rest of the time.
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        layer?.backgroundColor = nil
+        // Pets stayed parked while the user dragged; now that the final
+        // size is known, ask the scene to animate them to their new
+        // centered positions.
+        (scene as? TankScene)?.onLiveResizeEnded?()
     }
 
     /// Suppress AppKit's default contextual-menu pathway so we can build the
     /// pet picker ourselves on `rightMouseDown`.
     override func menu(for event: NSEvent) -> NSMenu? { nil }
+
+    /// Force the SKView to redraw on every step of a live resize instead of
+    /// stretching the previous frame's contents. Combined with
+    /// `BackgroundNode.resize`'s O(1) sprite-size update (no per-frame
+    /// gradient regen), this keeps the tank's contents at their natural
+    /// size as the user drags the window's resize handle.
+    override var preservesContentDuringLiveResize: Bool { false }
 
     override func rightMouseDown(with event: NSEvent) {
         guard let scene = scene, let onPetRightClicked = onPetRightClicked else {

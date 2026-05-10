@@ -294,13 +294,11 @@ final class SceneDirectorBalloonTests: XCTestCase {
         return p
     }
 
-    private func makeDirector(maxVisiblePets: Int = 4,
-                              petGap: CGFloat = 24) -> SceneDirector {
+    private func makeDirector(petGap: CGFloat = 24) -> SceneDirector {
         SceneDirector(library: PetLibrary(),
                       packsByID: ["sample-pet": validPack()],
                       sceneSize: CGSize(width: 600, height: 200),
                       petScale: 1.0,
-                      maxVisiblePets: maxVisiblePets,
                       petGap: petGap)
     }
 
@@ -639,13 +637,11 @@ final class SceneDirectorSlotTests: XCTestCase {
         return p
     }
 
-    private func makeDirector(maxVisiblePets: Int = 4,
-                              petGap: CGFloat = 24) -> SceneDirector {
+    private func makeDirector(petGap: CGFloat = 24) -> SceneDirector {
         SceneDirector(library: PetLibrary(),
                       packsByID: ["sample-pet": validPack()],
                       sceneSize: CGSize(width: 600, height: 200),
                       petScale: 1.0,
-                      maxVisiblePets: maxVisiblePets,
                       petGap: petGap)
     }
 
@@ -703,7 +699,7 @@ final class SceneDirectorSlotTests: XCTestCase {
     }
 }
 
-final class SceneDirectorOverflowTests: XCTestCase {
+final class SceneDirectorVisibilityTests: XCTestCase {
     private func validPack() -> PetPack {
         let url = Bundle(for: type(of: self)).url(forResource: "Fixtures", withExtension: nil)!
             .appendingPathComponent("valid-pet")
@@ -711,12 +707,11 @@ final class SceneDirectorOverflowTests: XCTestCase {
         return p
     }
 
-    private func makeDirector(maxVisiblePets: Int) -> SceneDirector {
+    private func makeDirector() -> SceneDirector {
         SceneDirector(library: PetLibrary(),
                       packsByID: ["sample-pet": validPack()],
                       sceneSize: CGSize(width: 600, height: 200),
-                      petScale: 1.0,
-                      maxVisiblePets: maxVisiblePets)
+                      petScale: 1.0)
     }
 
     private func session(key: String, lastEventAt: Date) -> Session {
@@ -728,73 +723,29 @@ final class SceneDirectorOverflowTests: XCTestCase {
         return s
     }
 
-    func test_belowCap_noOverflowIndicator() {
-        let director = makeDirector(maxVisiblePets: 4)
+    /// Every active session gets a slot — there is no visibility cap.
+    func test_allSessionsAreRendered_regardlessOfCount() {
+        let director = makeDirector()
         let t = Date()
-        for i in 0..<3 {
+        for i in 0..<10 {
             director.addOrUpdate(session: session(key: "k\(i)",
                                                   lastEventAt: t.addingTimeInterval(Double(i))))
         }
-        XCTAssertEqual(director.visiblePetCount, 3)
-        XCTAssertNil(director.overflowText)
-    }
-
-    func test_overCap_evictsOldestAndShowsCount() {
-        let director = makeDirector(maxVisiblePets: 4)
-        let t = Date()
-        // 6 sessions; oldest two should be hidden.
-        for i in 0..<6 {
-            director.addOrUpdate(session: session(key: "k\(i)",
-                                                  lastEventAt: t.addingTimeInterval(Double(i))))
+        XCTAssertEqual(director.visiblePetCount, 10)
+        for i in 0..<10 {
+            XCTAssertNotNil(director.slot(for: "k\(i)"))
         }
-        XCTAssertEqual(director.visiblePetCount, 4)
-        XCTAssertEqual(director.overflowText, "+2")
-        // The two oldest (k0, k1) should be evicted.
-        XCTAssertNil(director.slot(for: "k0"))
-        XCTAssertNil(director.slot(for: "k1"))
-        XCTAssertNotNil(director.slot(for: "k5"))
     }
 
-    func test_hiddenSessionPromotedWhenItBecomesMostRecent() {
-        let director = makeDirector(maxVisiblePets: 2)
-        let t = Date()
-        director.addOrUpdate(session: session(key: "old",
-                                              lastEventAt: t))
-        director.addOrUpdate(session: session(key: "mid",
-                                              lastEventAt: t.addingTimeInterval(1)))
-        director.addOrUpdate(session: session(key: "new",
-                                              lastEventAt: t.addingTimeInterval(2)))
-        XCTAssertNil(director.slot(for: "old"), "oldest should be hidden under cap=2")
-
-        // 'old' bumps its activity — should swap in, knocking 'mid' out.
-        director.addOrUpdate(session: session(key: "old",
-                                              lastEventAt: t.addingTimeInterval(3)))
-        XCTAssertNotNil(director.slot(for: "old"))
-        XCTAssertNil(director.slot(for: "mid"))
-        XCTAssertEqual(director.overflowText, "+1")
-    }
-
-    func test_removingHiddenSession_dropsOverflowCount() {
-        let director = makeDirector(maxVisiblePets: 2)
+    /// Removing a session despawns its pet and frees the slot for reuse.
+    func test_removingSession_despawnsAndFreesSlot() {
+        let director = makeDirector()
         let t = Date()
         director.addOrUpdate(session: session(key: "k0", lastEventAt: t))
         director.addOrUpdate(session: session(key: "k1", lastEventAt: t.addingTimeInterval(1)))
-        director.addOrUpdate(session: session(key: "k2", lastEventAt: t.addingTimeInterval(2)))
-        XCTAssertEqual(director.overflowText, "+1")
-        director.remove(sessionKey: "k0")   // remove the hidden one
-        XCTAssertNil(director.overflowText)
         XCTAssertEqual(director.visiblePetCount, 2)
-    }
-
-    func test_removingVisibleSession_promotesHiddenOne() {
-        let director = makeDirector(maxVisiblePets: 2)
-        let t = Date()
-        director.addOrUpdate(session: session(key: "k0", lastEventAt: t))
-        director.addOrUpdate(session: session(key: "k1", lastEventAt: t.addingTimeInterval(1)))
-        director.addOrUpdate(session: session(key: "k2", lastEventAt: t.addingTimeInterval(2)))
+        director.remove(sessionKey: "k0")
+        XCTAssertEqual(director.visiblePetCount, 1)
         XCTAssertNil(director.slot(for: "k0"))
-        director.remove(sessionKey: "k2")
-        XCTAssertNotNil(director.slot(for: "k0"), "hidden session should fill the freed slot")
-        XCTAssertNil(director.overflowText)
     }
 }

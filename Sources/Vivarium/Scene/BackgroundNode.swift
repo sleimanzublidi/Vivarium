@@ -34,23 +34,32 @@ final class BackgroundNode: SKNode {
     ]
 
     private(set) var stars: [SKShapeNode] = []
+    private let sky: SKSpriteNode
+    private let grass: SKSpriteNode
 
     init(size: CGSize) {
-        super.init()
-
-        let sky = SKSpriteNode(texture: SKTexture(cgImage: Self.gradientImage(
+        sky = SKSpriteNode(texture: SKTexture(cgImage: Self.gradientImage(
             size: size, top: Self.skyTop, bottom: Self.skyBottom)))
         sky.anchorPoint = .zero
         sky.position = .zero
         sky.zPosition = 0
+
+        let grassSize = Self.grassSize(for: size)
+        grass = SKSpriteNode(texture: SKTexture(cgImage: Self.gradientImage(
+            size: grassSize, top: Self.grassTop, bottom: Self.grassBottom)))
+        grass.anchorPoint = .zero
+        grass.position = .zero
+        grass.zPosition = 2
+
+        super.init()
         addChild(sky)
+        addChild(grass)
 
         for spec in Self.starSpecs {
             let star = SKShapeNode(circleOfRadius: spec.radius)
             star.fillColor = spec.color
             star.strokeColor = .clear
-            star.position = CGPoint(x: min(spec.x, size.width - spec.radius),
-                                    y: max(spec.radius, size.height - spec.yFromTop))
+            star.position = Self.starPosition(spec: spec, sceneSize: size)
             star.zPosition = 1
             // Twinkle: dim → wait → re-brighten → wait. Per-star randomised
             // periods so the stars don't pulse in lockstep.
@@ -66,18 +75,35 @@ final class BackgroundNode: SKNode {
             addChild(star)
             stars.append(star)
         }
-
-        let grassSize = CGSize(width: size.width,
-                               height: min(Self.grassHeight, size.height))
-        let grass = SKSpriteNode(texture: SKTexture(cgImage: Self.gradientImage(
-            size: grassSize, top: Self.grassTop, bottom: Self.grassBottom)))
-        grass.anchorPoint = .zero
-        grass.position = .zero
-        grass.zPosition = 2
-        addChild(grass)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Re-fit sky, grass, and stars to a new scene size. Called by
+    /// `SceneDirector` when the floating-tank window is resized so the
+    /// backdrop tracks the enlarged roaming area instead of being scaled
+    /// up visually. Both gradients are vertical, so we just stretch the
+    /// existing 1-pixel-wide gradient textures to the new bounds — no
+    /// per-frame bitmap regeneration, which keeps live-resize cheap.
+    /// Star twinkle actions keep running across the resize.
+    func resize(to size: CGSize) {
+        sky.size = size
+        grass.size = Self.grassSize(for: size)
+
+        for (star, spec) in zip(stars, Self.starSpecs) {
+            star.position = Self.starPosition(spec: spec, sceneSize: size)
+        }
+    }
+
+    private static func grassSize(for sceneSize: CGSize) -> CGSize {
+        CGSize(width: sceneSize.width,
+               height: min(Self.grassHeight, sceneSize.height))
+    }
+
+    private static func starPosition(spec: StarSpec, sceneSize: CGSize) -> CGPoint {
+        CGPoint(x: min(spec.x, sceneSize.width - spec.radius),
+                y: max(spec.radius, sceneSize.height - spec.yFromTop))
+    }
 
     /// Render a vertical gradient (`top` at y=height, `bottom` at y=0) into a
     /// `CGImage`. Used to build the sky and grass sprites so we don't ship
