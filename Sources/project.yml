@@ -40,6 +40,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.sleimanzublidi.vivarium.App
         ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
+        # The app icon ships as a loose AppIcon.icns referenced by
+        # Info.plist's CFBundleIconFile. There is no Assets.xcassets, so
+        # clear xcodegen's default AppIcon asset-catalog name to keep
+        # the pbxproj from carrying a misleading orphan setting.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
 
   VivariumNotify:
     type: tool
