@@ -96,12 +96,15 @@ final class ActiveSessionsSnapshotTests: XCTestCase {
                              label: "beta",
                              state: .idle,
                              lastEventAt: Date(timeIntervalSince1970: 940))
-        let items = ActiveSessionsSnapshot.makeMenuItems(sessions: [s1, s2], now: now)
+        let items = ActiveSessionsSnapshot.makeMenuItems(sessions: [s1, s2],
+                                                         now: now,
+                                                         petDisplayName: { _ in "Sample Pet" })
         XCTAssertEqual(items.count, 2)
         for item in items {
             XCTAssertTrue(item.isEnabled)
             XCTAssertNil(item.action)
             XCTAssertFalse(item.title.isEmpty)
+            XCTAssertTrue(item.title.contains("Sample Pet"))
         }
         // Order matches the input (the snapshot is responsible for sorting).
         XCTAssertTrue(items[0].title.contains("alpha"))
@@ -109,6 +112,17 @@ final class ActiveSessionsSnapshotTests: XCTestCase {
         XCTAssertTrue(items[0].title.contains("running"))
         XCTAssertTrue(items[1].title.contains("beta"))
         XCTAssertTrue(items[1].title.contains("Copilot CLI"))
+    }
+
+    func test_makeMenuItems_fallsBackToPetIdWhenDisplayNameMissing() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let s = makeSession(key: "k1",
+                            startedAt: Date(timeIntervalSince1970: 100),
+                            label: "alpha")
+        // Default resolver returns nil — petId should appear verbatim.
+        let items = ActiveSessionsSnapshot.makeMenuItems(sessions: [s], now: now)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertTrue(items[0].title.contains("sample-pet"))
     }
 
     // MARK: - Relative timestamp

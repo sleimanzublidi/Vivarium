@@ -40,14 +40,22 @@ struct ActiveSessionsSnapshot {
     /// Build read-only `NSMenuItem`s for the submenu. Empty
     /// snapshot returns exactly one item with the empty-state copy; non-empty
     /// returns one row per session in `startedAt` order.
-    static func makeMenuItems(sessions: [Session], now: Date) -> [NSMenuItem] {
+    ///
+    /// `petDisplayName` resolves `session.project.petId` to a user-facing
+    /// label. Pass `nil` (or return `nil`) to fall back to the raw petId so
+    /// callers that don't have a library handy still get a sensible row.
+    static func makeMenuItems(sessions: [Session],
+                              now: Date,
+                              petDisplayName: (String) -> String? = { _ in nil }) -> [NSMenuItem] {
         if sessions.isEmpty {
             let item = NSMenuItem(title: emptyMenuItemTitle, action: nil, keyEquivalent: "")
             item.isEnabled = false
             return [item]
         }
         return sessions.map { s in
-            let item = NSMenuItem(title: rowTitle(for: s, now: now),
+            let item = NSMenuItem(title: rowTitle(for: s,
+                                                  now: now,
+                                                  petDisplayName: petDisplayName(s.project.petId)),
                                   action: nil,
                                   keyEquivalent: "")
             item.isEnabled = true
@@ -55,9 +63,12 @@ struct ActiveSessionsSnapshot {
         }
     }
 
-    static func rowTitle(for session: Session, now: Date) -> String {
+    static func rowTitle(for session: Session,
+                         now: Date,
+                         petDisplayName: String? = nil) -> String {
         let relative = formatRelative(from: session.lastEventAt, to: now)
-        return "\(session.project.label) — \(session.agent.displayName) · \(session.state.rawValue) · \(relative)"
+        let pet = petDisplayName ?? session.project.petId
+        return "\(session.project.label) — \(session.agent.displayName) · \(pet) · \(session.state.rawValue) · \(relative)"
     }
 
     /// Compact "Ns ago" / "Nm ago" / "Nh ago" / "Nd ago" formatter. Inline

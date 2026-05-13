@@ -42,25 +42,30 @@ struct ProjectResolver {
     }
 
     func resolve(cwd: URL, agent: AgentType) -> ProjectIdentity {
-        // 1. override match wins
+        // 1. hardcoded override match wins for both label and pet
         if let o = overrides.first(where: { o in
             fnmatch_strict(pattern: o.matchGlob, path: cwd.path)
         }) {
             return ProjectIdentity(url: cwd, label: o.label, petId: o.petId)
         }
 
+        // Settings-driven label override is consulted against `cwd.path`
+        // (matching the hardcoded Override behavior) and only changes the
+        // displayed label — the url + auto-resolved pet are unaffected.
+        let settingsLabel = settingsStore?.labelOverride(for: cwd)
+
         // 2. git root
         if let root = findGitRoot(start: cwd) {
             return ProjectIdentity(
                 url: root,
-                label: root.lastPathComponent,
+                label: settingsLabel ?? root.lastPathComponent,
                 petId: petID(for: root, agent: agent)
             )
         }
 
         // 3. cwd
         return ProjectIdentity(url: cwd,
-                               label: cwd.lastPathComponent,
+                               label: settingsLabel ?? cwd.lastPathComponent,
                                petId: petID(for: cwd, agent: agent))
     }
 
@@ -94,14 +99,23 @@ final class GlobalSettingsStore {
     struct Settings: Codable, Equatable {
         var version: Int
         var projectPets: [String: String]
+        /// User-defined label overrides keyed by POSIX glob (matched against
+        /// the session's `cwd.path` using `fnmatch` with `FNM_PATHNAME`).
+        /// First-match is determined by longest-glob-wins (alphabetical
+        /// tiebreaker) so the matching order is deterministic regardless of
+        /// dictionary insertion order. Applies to the displayed label only;
+        /// the resolved project url and auto-chosen pet are unaffected.
+        var projectLabels: [String: String]
         var windowOpacity: Int
 
         init(version: Int = 1,
              projectPets: [String: String] = [:],
+             projectLabels: [String: String] = [:],
              windowOpacity: Int = GlobalSettingsStore.defaultWindowOpacity)
         {
             self.version = version
             self.projectPets = projectPets
+            self.projectLabels = projectLabels
             self.windowOpacity = GlobalSettingsStore.clampWindowOpacity(windowOpacity)
         }
 
@@ -109,6 +123,7 @@ final class GlobalSettingsStore {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
             projectPets = try container.decodeIfPresent([String: String].self, forKey: .projectPets) ?? [:]
+            projectLabels = try container.decodeIfPresent([String: String].self, forKey: .projectLabels) ?? [:]
             let raw = try container.decodeIfPresent(Int.self, forKey: .windowOpacity)
                 ?? GlobalSettingsStore.defaultWindowOpacity
             windowOpacity = GlobalSettingsStore.clampWindowOpacity(raw)
@@ -183,6 +198,27 @@ final class GlobalSettingsStore {
         guard settings.projectPets[key] != petID else { return }
         settings.projectPets[key] = petID
         saveSettings(settings)
+    }
+
+    /// Resolve the user-defined display label for a session whose working
+    /// directory is `cwd`. Returns the label of the longest matching glob,
+    /// with alphabetical tiebreaking so the result is stable across runs and
+    /// dictionary orderings. `nil` if no glob matches — the caller falls
+    /// back to its own default (git-root or cwd folder name).
+    func labelOverride(for cwd: URL) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        let labels = loadSettings().projectLabels
+        guard !labels.isEmpty else { return nil }
+        let path = cwd.standardizedFileURL.path
+        let orderedGlobs = labels.keys.sorted { lhs, rhs in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            return lhs < rhs
+        }
+        for glob in orderedGlobs where fnmatch_strict(pattern: glob, path: path) {
+            return labels[glob]
+        }
+        return nil
     }
 
     /// Persisted whole-window opacity as an integer percentage in
@@ -274,7 +310,7 @@ final class GlobalSettingsStore {
     }
 }
 
-private func fnmatch_strict(pattern: String, path: String) -> Bool {
+func fnmatch_strict(pattern: String, path: String) -> Bool {
     pattern.withCString { p in
         path.withCString { s in
             Darwin.fnmatch(p, s, FNM_PATHNAME) == 0

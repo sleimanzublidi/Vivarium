@@ -359,6 +359,149 @@ final class ProjectResolverTests: XCTestCase {
                        "sample-pet must never be written as a per-project mapping")
     }
 
+    // MARK: - Label overrides (settings.json projectLabels)
+
+    func test_labelOverride_replacesGitRootLabel() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let root = makeTempDir()
+        mkdir(root.appendingPathComponent(".git"))
+        let sub = root.appendingPathComponent("a/b"); mkdir(sub)
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        // Glob matches the actual cwd path (sub), not the git root.
+        let existing = GlobalSettingsStore.Settings(
+            projectLabels: ["\(root.path)/*/*": "Pretty Name"])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "sample-pet" }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: [],
+                                       settingsStore: store)
+
+        let pid = resolver.resolve(cwd: sub, agent: .claudeCode)
+        // Label overridden; url stays the git root.
+        XCTAssertEqual(pid.label, "Pretty Name")
+        XCTAssertEqual(pid.url.standardizedFileURL, root.standardizedFileURL)
+    }
+
+    func test_labelOverride_appliesWhenNoGitRoot() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let existing = GlobalSettingsStore.Settings(
+            projectLabels: [project.path: "Renamed"])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "sample-pet" }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: project, agent: .claudeCode).label, "Renamed")
+    }
+
+    func test_labelOverride_longestGlobWinsOnMultipleMatches() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let root = makeTempDir()
+        mkdir(root.appendingPathComponent(".git"))
+        let sub = root.appendingPathComponent("services/auth"); mkdir(sub)
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        // Both globs match `sub` — the more specific (longer) one should win.
+        let existing = GlobalSettingsStore.Settings(projectLabels: [
+            "\(root.path)/*/*":         "Generic",
+            "\(root.path)/services/*":  "Specific",
+        ])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "sample-pet" }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: sub, agent: .claudeCode).label, "Specific")
+    }
+
+    func test_labelOverride_doesNotChangeAutoResolvedPet() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let project = makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let existing = GlobalSettingsStore.Settings(
+            projectLabels: [project.path: "Renamed"])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "bitboy" }
+        let resolver = ProjectResolver(overrides: [],
+                                       defaultPetID: "sample-pet",
+                                       availablePetIDs: ["bitboy", "other"],
+                                       settingsStore: store)
+
+        let pid = resolver.resolve(cwd: project, agent: .claudeCode)
+        XCTAssertEqual(pid.label, "Renamed")
+        XCTAssertEqual(pid.petId, "bitboy")
+    }
+
+    func test_hardcodedOverrideStillBeatsSettingsLabel() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        let root = makeTempDir()
+        mkdir(root.appendingPathComponent(".git"))
+        let sub = root.appendingPathComponent("services/auth"); mkdir(sub)
+        defer {
+            try? FileManager.default.removeItem(at: settingsDir)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let existing = GlobalSettingsStore.Settings(
+            projectLabels: ["\(root.path)/services/*": "FromSettings"])
+        try JSONEncoder().encode(existing).write(to: settingsURL)
+
+        let override = ProjectResolver.Override(
+            matchGlob: "\(root.path)/services/*",
+            label: "FromCodeOverride",
+            petId: "wizard")
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "sample-pet" }
+        let resolver = ProjectResolver(overrides: [override],
+                                       defaultPetID: "sample-pet",
+                                       settingsStore: store)
+
+        XCTAssertEqual(resolver.resolve(cwd: sub, agent: .claudeCode).label, "FromCodeOverride")
+    }
+
+    func test_legacySettingsFileWithoutProjectLabels_decodesAndDefaultsEmpty() throws {
+        let settingsDir = makeTempDir()
+        let settingsURL = settingsDir.appendingPathComponent("settings.json")
+        defer { try? FileManager.default.removeItem(at: settingsDir) }
+
+        // Simulate a pre-projectLabels file: only the older keys present.
+        let legacyJSON = #"""
+        {"version":1,"projectPets":{},"windowOpacity":100}
+        """#
+        try legacyJSON.data(using: .utf8)!.write(to: settingsURL)
+
+        let store = GlobalSettingsStore(settingsURL: settingsURL) { _ in "sample-pet" }
+        XCTAssertNil(store.labelOverride(for: URL(fileURLWithPath: "/anywhere")))
+    }
+
     func test_gitRootIsUsedAsProjectPetMappingKey() {
         let settingsDir = makeTempDir()
         let settingsURL = settingsDir.appendingPathComponent("settings.json")

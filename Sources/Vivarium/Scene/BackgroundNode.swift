@@ -13,7 +13,7 @@ final class BackgroundNode: SKNode {
     /// Grass strip — `#2d4a2d` at top → `#1a331a` at bottom.
     private static let grassTop = NSColor(srgbHex: 0x2d4a2d)
     private static let grassBottom = NSColor(srgbHex: 0x1a331a)
-    static let grassHeight: CGFloat = 14
+    static let grassHeight: CGFloat = 28
 
     /// Pixel-art star positions are authored against Clawd's 320×172 LCD.
     /// We place them by `yFromTop` so they sit in the upper portion of the

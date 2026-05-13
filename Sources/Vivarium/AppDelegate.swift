@@ -231,8 +231,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                             keyEquivalent: "")
         let activeSessionsSubmenu = NSMenu(title: "Active sessions")
         activeSessionsSubmenu.autoenablesItems = false
+        let petDisplayNames = Dictionary(uniqueKeysWithValues:
+            (director?.availablePets() ?? []).map { ($0.id, $0.displayName) })
         for item in ActiveSessionsSnapshot.makeMenuItems(sessions: activeSessionsSnapshot.sessions,
-                                                         now: Date())
+                                                         now: Date(),
+                                                         petDisplayName: { petDisplayNames[$0] })
         {
             activeSessionsSubmenu.addItem(item)
         }
