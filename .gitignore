@@ -12,6 +12,7 @@ superpowers/
 build/
 dist/
 DerivedData/
+Releases/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/

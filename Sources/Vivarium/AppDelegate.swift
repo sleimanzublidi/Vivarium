@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     #endif
     private var activeSessionsSnapshot = ActiveSessionsSnapshot()
     private let petRegistry = InstalledPetRegistry()
+    private let aboutPanelController = AboutPanelController()
     private let normalizer = EventNormalizer(adapters: [
         ClaudeCodeAdapter(),
         CopilotCLIAdapter(),
@@ -201,6 +202,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildStatusItemMenu(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        let about = menu.addItem(withTitle: "About Vivarium",
+                                 action: #selector(openAboutPanel),
+                                 keyEquivalent: "")
+        about.target = self
+        menu.addItem(.separator())
+
         let claudeStatus = HookInstallationProbe.probe(agent: .claudeCode,
                                                        settingsURL: claudeSettingsURL)
         let copilotStatus = HookInstallationProbe.probe(agent: .copilotCli,
@@ -363,6 +370,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func openAboutPanel() {
+        aboutPanelController.showPanel()
     }
 
     /// Build the menu bar icon: load `Icon.pdf` from the bundle and resize it

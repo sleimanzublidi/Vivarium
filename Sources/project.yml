@@ -45,6 +45,26 @@ targets:
         # clear xcodegen's default AppIcon asset-catalog name to keep
         # the pbxproj from carrying a misleading orphan setting.
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
+    # Stamps versions into the built Info.plist (not the source) using the
+    # current git commit count as the build number. The source plist declares
+    # Major.Minor (e.g. "1.0") and this phase appends ".<build>" to produce
+    # the full Major.Minor.Build short version (e.g. "1.0.103"). CFBundleVersion
+    # is set to the same build number. Runs as the last build phase, before
+    # code signing, so the bundle ships with a fresh, monotonic version
+    # without dirtying the source plist.
+    postBuildScripts:
+      - name: Set Build Number
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          cd "$SRCROOT"
+          BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+          PLIST="$BUILT_PRODUCTS_DIR/$INFOPLIST_PATH"
+          MAJOR_MINOR="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")"
+          SHORT_VERSION="$MAJOR_MINOR.$BUILD_NUMBER"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$PLIST"
+          echo "note: version set to $SHORT_VERSION (build $BUILD_NUMBER)"
 
   VivariumNotify:
     type: tool
